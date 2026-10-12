@@ -634,6 +634,43 @@ function Distributions.pdf(dph::DPH{T}, x::Integer) where {T}
 end
 
 """
+    _shifted_negbin_structure(dph) -> (c, r, p) or nothing
+
+Detect a DPH that is `c ≥ 0` deterministic one-step delay states followed by a
+NegBin chain of `r` stages with per-step progression probability `p`, i.e. the
+structure built by `dph_negative_binomial` (c = 0) and
+`dph_prepend_deterministic_delay(dph_negative_binomial(r, p), c)`. Every entry of
+`α` and `S` is checked, so any other DPH returns `nothing`. The check compares
+values only, so it is ForwardDiff-safe.
+"""
+function _shifted_negbin_structure(dph::DPH)
+    α, S, s = dph.α, dph.S, dph.s
+    k = length(s)
+    isone(α[1]) && all(i -> iszero(α[i]), 2:k) || return nothing
+    # leading deterministic delay states: S[i, i+1] == 1, nothing else in the row
+    c = 0
+    while c < k - 1 && iszero(S[c+1, c+1]) && isone(S[c+1, c+2]) && iszero(s[c+1])
+        c += 1
+    end
+    r = k - c
+    p = s[k]
+    (zero(p) < p <= one(p)) || return nothing
+    for i in 1:k, j in 1:k
+        target = if i <= c
+            j == i + 1 ? one(p) : zero(p)
+        elseif j == i
+            one(p) - p
+        elseif j == i + 1
+            p
+        else
+            zero(p)
+        end
+        isapprox(S[i, j], target; atol = 1e-12) || return nothing
+    end
+    return (c, r, p)
+end
+
+"""
     Distributions.logpdf(dph::DPH{T}, x::Integer) where {T}
 
 Compute the log probability mass function for Turing.jl compatibility.
@@ -646,26 +683,20 @@ Compute the log probability mass function for Turing.jl compatibility.
 - Log probability mass at x
 """
 function Distributions.logpdf(dph::DPH{T}, x::Integer) where {T}
-    k = length(dph.s)
-    # NegBin-chain detection: only the last transient state has positive absorption
-    # probability (s[1:k-1] == 0 exactly as constructed). Covers geometric (k=1)
-    # and NegBin (k=r) DPH. Uses scalar arithmetic — ForwardDiff-safe, no matrix power.
-    if all(i -> iszero(dph.s[i]), 1:k-1)
-        return negbin_total_logpdf(x, k, dph.s[k])
+    # Shifted-NegBin detection: c deterministic delay steps followed by a NegBin(r, p)
+    # chain (c = 0 covers geometric and NegBin DPH). Uses scalar arithmetic —
+    # ForwardDiff-safe, no matrix power. Other DPH use the exact matrix PMF.
+    st = _shifted_negbin_structure(dph)
+    if st !== nothing
+        c, r, p = st
+        return negbin_total_logpdf(x - c, r, p)
     end
     pmf_val = pmf(dph, x)
     return log(max(pmf_val, 1e-12))
 end
 
 # Also define logpdf without Distributions prefix for convenience
-function logpdf(dph::DPH{T}, x::Integer) where {T}
-    k = length(dph.s)
-    if all(i -> iszero(dph.s[i]), 1:k-1)
-        return negbin_total_logpdf(x, k, dph.s[k])
-    end
-    pmf_val = pmf(dph, x)
-    return log(max(pmf_val, 1e-12))
-end
+logpdf(dph::DPH{T}, x::Integer) where {T} = Distributions.logpdf(dph, x)
 
 """
     negbin_total_logpdf(k, r, p)
