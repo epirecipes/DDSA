@@ -12,8 +12,9 @@ format:
 execute:
     cache: true
 engine: julia
-julia: 
-    env: ["JULIA_NUM_THREADS=10"]
+julia:
+    exeflags: ["--project=@."]
+    env: ["JULIA_NUM_THREADS=10", "GKSwstype=100"]   # GKSwstype=100: headless GR plotting
 ---
 
 ## Introduction
@@ -65,6 +66,8 @@ using Dates               # For now()
 using CSV                 # For reading CSV files
 using DataFrames          # For data manipulation
 using Statistics          # For statistical functions
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 ```
 
 We set a random seed for reproducibility.
@@ -224,6 +227,8 @@ T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
+# Prior support of N, summed out in the likelihood: N ∈ {N_min, …, N_min + 19,999}
+N_grid = NGrid(K_total, N_min, N_min + 19_999)
 
 ```
 
@@ -247,6 +252,8 @@ println("  Recovery intervals range: $(minimum(delta_complete))–$(maximum(delt
 
 The Turing.jl probabilistic model for the model, specifies priors, simulates the difference equations, and defines the likelihood for observed data by defining the distributions of (a) the total infected (b) the distribution of infection times, (c) the distribution of recovery times and (d) the convolution over unknown onset time for recovery-only records. We place uniform priors on the parameters, as upper and lower bounds are typically easy for the user to define. Here, we take advantage of the discrete nature of the data, by fitting a histogram of the infection times using a multinomial distribution, rather than a series of categorical distributions.
 
+The wave-specific at-risk population $N$ is integer-valued and enters the likelihood only through the Binomial final-size term. Instead of sampling it, we sum that term over its prior support, $N \in \{N_{\min}, \ldots, N_{\min} + 19{,}999\}$ with $N_{\min} = K$ (`marginal_N_loglik`, from the shared `IntegerParameters.jl`). The discrete-time model and its likelihood are unchanged; only the real-valued parameters $(\beta, \gamma, \rho)$ are sampled, with NUTS, and posterior draws of $N$ are recovered afterwards from its exact conditional distribution given $\tau$.
+
 ```{julia}
 #| echo: true
 #| output: false
@@ -256,17 +263,13 @@ The Turing.jl probabilistic model for the model, specifies priors, simulates the
                                      th_onset::Vector{Int},
                                      delta_complete::Vector{Int},
                                      T_hosp_only::Vector{Int},
-                                     N_min::Int)
+                                     N_grid::NGrid)   # prior support of N
 
     # Priors for model parameters
     β ~ Uniform(0.01, 1.0)   # Transmission rate 
     γ ~ Uniform(0.01, 1.0)   # Recovery rate 
     ρ ~ Beta(1.0, 500.0)      # Initial infected proportion 
-
-    N_float ~ Uniform(Float64(N_min), Float64(N_min + 20000))
-    # Convert to integer for Binomial: use floor and clamp to ensure N >= N_min
-    # The conversion is done after sampling, so NUTS can sample continuously
-    N = Int(floor(max(Float64(N_min), N_float)))
+    # N ~ DiscreteUniform(N_min, N_min + 19_999) is summed out in term (1) below
     
     # Simulate deterministic model 
     _, τ, f = simulate(β, γ, ρ, nsteps)
@@ -279,8 +282,9 @@ The Turing.jl probabilistic model for the model, specifies priors, simulates the
     f_valid = f_valid / sum(f_valid)   # Normalise
     log_f_valid = log.(f_valid)
     
-    # (1) Binomial final-size: all K_total infections
-    K_total ~ Binomial(N, τ_valid)
+    # (1) Binomial final-size: all K_total infections, summed over N:
+    #     log Σ_N P(N) · Binomial(K_total; N, τ)
+    Turing.@addlogprob! marginal_N_loglik(N_grid, τ_valid)
 
     # (2) Multinomial onset histogram: records with known onset (K_onset)
     th_onset ~ Multinomial(K_onset, f_valid)
@@ -304,7 +308,7 @@ The Turing.jl probabilistic model for the model, specifies priors, simulates the
         Turing.@addlogprob! foldl(logaddexp, log_terms; init = -Inf)
     end
 
-    return (β=β, γ=γ, ρ=ρ, N=N_float)
+    return τ_valid   # used to draw N after sampling
 end;
 ```
 
@@ -315,9 +319,11 @@ We now perform inference using the Turing model. We start by setting the number 
 ```{julia}
 #| echo: true
 #| output: false
-n_samples = 5000
+n_samples  = 2000
+nuts_adapt = 1000
+n_chains   = 4
 model = dsa_ebola_allrecords(nsteps, K_total, K_onset,
-                              th_onset, delta_complete, T_hosp_only, N_min);
+                              th_onset, delta_complete, T_hosp_only, N_grid);
 ```
 
 Next, we run inference using the No U-Turn Sampler (NUTS).
@@ -325,14 +331,28 @@ Next, we run inference using the No U-Turn Sampler (NUTS).
 ```{julia}
 #| echo: true
 #| output: false
+sampler = NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
+# Turing's default start (uniform(-2, 2) on the unconstrained scale) can lie far outside the prior's
+# mass, e.g. ρ ≈ 0.5 under Beta(1, 500), so it is not used.
+# Chains start from jittered data-based values (Methods): γ from the mean recorded onset-to-hospitalisation
+# interval (p_γ = 1/mean δ), β at R0 = 1 (N is unknown, so the final size cannot be used) and ρ at its prior
+# median; each value is multiplied by exp(0.1 z), z ~ N(0, 1), per chain.
+init_rng = Xoshiro(20261006)
+function data_inits(n)
+    pγ0 = 1 / mean(delta_complete); γ0 = -log(1 - pγ0); ρh = median(Beta(1.0, 500.0))
+    j() = exp(0.1 * randn(init_rng))
+    [InitFromParams((β = clamp(j() * pγ0, 0.011, 0.99), γ = clamp(j() * γ0, 0.011, 0.99), ρ = j() * ρh)) for _ in 1:n]
+end
 # Warmup
-_ = sample(model, NUTS(), 1)
+_ = sample(model, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
 # Run sampler on 4 chains
-@time chain = sample(model,
-                     NUTS(500, 0.65; max_depth=12, Δ_max=1000.0, init_ϵ=0.2),
-                     MCMCThreads(),
-                     n_samples,
-                     4);
+@time chain = sample(model, sampler, MCMCThreads(), n_samples, n_chains;
+                     progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains));
+
+# Posterior draws of N: one draw from P(N | K, τ) per MCMC draw, added to the chain as :N
+τ_draws = returned(model, chain)
+N_draws = [sample_N(N_grid, τ) for τ in τ_draws]
+chain   = hcat(chain, setrange(Chains(reshape(N_draws, size(N_draws, 1), 1, :), [:N]), range(chain)));
 ```
 
 ## Results Analysis
@@ -405,7 +425,7 @@ We can also plot posterior distributions for each parameter.
 β_med = median(chain[:β])
 γ_med = median(chain[:γ])
 ρ_med = median(chain[:ρ])
-N_med = median(chain[:N_float])
+N_med = median(chain[:N])
 
 # Vossler et al. (2022) Wave 1 reference values
 p1 = histogram(chain[:β], label="", title="β", density=true)
@@ -421,7 +441,7 @@ vline!(p3, [0.00021], label="Ref (Vossler et al.)", color=:black, linestyle=:das
 vline!(p3, [ρ_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)
 
 # N is wave-specific
-p4 = histogram(chain[:N_float], label="", title="N (Wave 1)", density=true, bins=50)
+p4 = histogram(chain[:N], label="", title="N (Wave 1)", density=true, bins=50)
 vline!(p4, [N_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)
 
 plot(p1, p2, p3, p4, layout=(2,2), plot_title="Posterior Distributions — Wave 1")
@@ -445,7 +465,7 @@ We summarise the posterior estimates for the model parameters.
 β_chain  = vec(chain[:β])
 γ_chain  = vec(chain[:γ])
 ρ_chain  = vec(chain[:ρ])
-N_chain  = vec(chain[:N_float])
+N_chain  = vec(chain[:N])
 pγ_chain = rate_to_proportion.(γ_chain)
 
 R0_chain       = β_chain ./ pγ_chain           # R0 of the discrete process
@@ -552,10 +572,30 @@ plot!(p1, 1:nsteps, f_median,
 plot(p1, size=(800, 500))
 ```
 
+## Save epidemic curve data
+
+```{julia}
+#| echo: false
+#| output: false
+let
+    data_dir = joinpath(@__DIR__, "fig_data")
+    mkpath(data_dir)
+    df_out = DataFrame(
+        day      = collect(0:(nsteps - 1)),
+        observed = th_onset,
+        f_median = f_median   .* K_onset,
+        f_lower  = f_lower    .* K_onset,
+        f_upper  = f_upper     .* K_onset
+    )
+    CSV.write(joinpath(data_dir, "wave1_allrecords_curve.csv"), df_out)
+    println("Saved wave1_allrecords_curve.csv")
+end
+```
+
 ## Discussion
 
 This example demonstrates a probabilistic programming approach to inference of individual infection and recovery times using a discrete version of dynamic survival analysis (DDSA) applied to Wave 1 of the Ebola outbreak data from the Democratic Republic of the Congo. The model provides posterior estimates for the transmission rate (β), recovery rate (γ), initial proportion of infected individuals (ρ), the implied initial infected count $I_0 = \rho N$, and the wave-specific effective at-risk scale (N) that enters the Binomial final-size observation model.
 
-Compared to the original implementation of DSA from Vossler et al. (2022), which used a stochastic SIR model solved via continuous-time ordinary differential equations (ODEs), we use a deterministic SIR map (discrete-time transition function) that updates the system state at discrete time steps using difference equations. Despite this difference in modelling approach, our posterior mean estimates for β, ρ fall within the 95% credible intervals of the original implementation: β = 0.19 [0.179, 0.202] (Vossler point estimate 0.190, CI [0.178, 0.204]); γ = 0.185 [0.171, 0.2] (Vossler 0.169 [0.157, 0.183]); $p_\gamma = 1 - e^{-\gamma}$ = 0.169 at the quoted γ, comparable to interpreting Vossler’s continuous removal rate on a daily scale; ρ = 0.00022 [0.00017, 0.00027] (Vossler 0.00021 [0.00016, 0.00027]); $I_0 = \rho N$ = 1.1 [0.8, 1.5]; $R_0 = \beta / p_\gamma$ = 1.126 (Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.91 days (Vossler 1/γ = 5.9 days).
+Compared to the original implementation of DSA from Vossler et al. (2022), which used a stochastic SIR model solved via continuous-time ordinary differential equations (ODEs), we use a deterministic SIR map (discrete-time transition function) that updates the system state at discrete time steps using difference equations. Despite this difference in modelling approach, our posterior mean estimates for β, ρ fall within the 95% credible intervals of the original implementation: β = 0.19 [0.179, 0.202] (Vossler point estimate 0.190, CI [0.178, 0.204]); γ = 0.185 [0.172, 0.199] (Vossler 0.169 [0.157, 0.183]); $p_\gamma = 1 - e^{-\gamma}$ = 0.169 at the quoted γ, comparable to interpreting Vossler’s continuous removal rate on a daily scale; ρ = 0.00022 [0.00017, 0.00028] (Vossler 0.00021 [0.00016, 0.00027]); $I_0 = \rho N$ = 1.1 [0.8, 1.5]; $R_0 = \beta / p_\gamma$ = 1.126 (Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.91 days (Vossler 1/γ = 5.9 days).
 
 Vossler et al. (2022) reported inference with a joint likelihood across waves and a single effective population size $N$ shared by all waves (together with wave-specific transmission and removal parameters). Here we fit Wave 1 only, in its own time window with re-initialised compartmental conditions, so our $N$ is a wave-specific effective susceptible scale in $K \sim \mathrm{Binomial}(N,\tau)$ for that window. Thus, it is not the same globally pooled $N$ estimand, though both play the same role of linking observed case counts to the model-implied attack fraction $\tau$.

@@ -14,7 +14,7 @@ format:
     gfm: default
 julia:
     exeflags: ["--project=@."]
-    env: ["JULIA_NUM_THREADS=10"]
+    env: ["JULIA_NUM_THREADS=10", "GKSwstype=100"]   # GKSwstype=100: headless GR plotting
 execute:
     cache: false
 ---
@@ -31,6 +31,7 @@ In this example, we use a discrete-time SIR model and Turing.jl to infer the sus
 
 using Distributions
 using Turing
+using MCMCChains   # sample(...; chain_type=MCMCChains.Chains)
 using StatsPlots
 using Plots
 using Statistics
@@ -38,6 +39,8 @@ using Random
 using CSV
 using DataFrames
 using MCMCDiagnosticTools
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 ```
 
 Set random seed for reproducibility
@@ -237,22 +240,24 @@ println("Peak infections: $peak_infections at time step $peak_time")
 
 The Turing.jl probabilistic model used to infer the parameters from this dataset employs the previously defined discrete-time SIR model. 
 
+The susceptible population $N$ is integer-valued and enters the likelihood only through the Binomial final-size term $K \sim \mathrm{Binomial}(N, \tau)$. Instead of sampling it, we sum this term over its prior support $N \in \{K+1, \ldots, N_{\max}\}$ (`marginal_N_loglik`, from the shared `IntegerParameters.jl`). The discrete-time model and its likelihood are unchanged; only the remaining real-valued parameters $(\beta, \gamma, \rho)$ are sampled, with NUTS. Posterior draws of $N$ are recovered afterwards from its exact conditional distribution given $\tau$.
+
 ```{julia}
 #| echo: true
 #| output: false
 @model function dsa_discrete_turing_multinomial_inferN(
-                                   N_max::Int,              # Upper bound for susceptible population (e.g. total student body)
+                                   N_grid::NGrid,           # Prior support of N: DiscreteUniform(K + 1, N_max)
                                    nsteps::Int,             # Number of time steps
                                    K::Int,                  # Observed total infections
                                    th::Vector{Int},         # Histogram of infection times
                                    delta::Vector{Int},      # Observed recovery intervals
                                    cens::Vector{Bool})      # Censoring (true=right-censored)
     
-    # Priors for model parameters
-    N ~ DiscreteUniform(K + 1, N_max)   # Susceptible pool
+    # Priors for model parameters (N ~ DiscreteUniform(K + 1, N_max) is summed out below)
     β ~ Uniform(0.01, 5.0)   # Transmission rate 
     γ ~ truncated(LogNormal(log(1/5.5), 0.3), 0.01, 1.0)   # Recovery rate 
-    ρ ~ Beta(0.01, 1.0)      # Initial infected proportion 
+    ρ ~ Beta(1.0, 10.0)      # Initial infected proportion: small seed (mean 0.09), allowing the substantial
+                             # fraction implied by a mid-epidemic start
     
     # Simulate deterministic model 
     _, τ, f = simulate(β, γ, ρ, nsteps)
@@ -264,8 +269,9 @@ The Turing.jl probabilistic model used to infer the parameters from this dataset
     f_valid = max.(f, 1e-10)           # Add small positive value to avoid zeros
     f_valid = f_valid ./ sum(f_valid)   # Normalise
     
-    # Likelihood for number of infections
-    K ~ Binomial(N, τ_valid)
+    # Likelihood for number of infections, summed over N:
+    #   log Σ_N P(N) · Binomial(K; N, τ)
+    Turing.@addlogprob! marginal_N_loglik(N_grid, τ_valid)
     
     # Likelihood for infection times 
     th ~ Multinomial(K, f_valid)
@@ -275,15 +281,18 @@ The Turing.jl probabilistic model used to infer the parameters from this dataset
     pγ = rate_to_proportion(γ)
     pγ_valid = min(max(pγ, ϵ), 1 - ϵ)
     log_surv = log1p(-pγ_valid)
+    # 1-indexed geometric, P(W = n) = pγ (1 − pγ)^(n−1) for n ≥ 1, matching the per-step
+    # recovery probability of the SIR map (Distributions.Geometric itself starts at 0)
+    G1 = LocationScale(1, 1, Geometric(pγ_valid))
     for i in eachindex(delta)
         if cens[i]
-            Turing.@addlogprob!(delta[i] * log_surv)  # log P(not yet recovered by step delta[i])
+            Turing.@addlogprob!(delta[i] * log_surv)  # log P(W > delta[i]) = delta[i]·log(1 − pγ)
         else
-            delta[i] ~ Geometric(pγ_valid)
+            delta[i] ~ G1
         end
     end
     
-    return (N=N, β=β, γ=γ, ρ=ρ)
+    return τ_valid   # used to draw N after sampling
 end
 ```
 
@@ -293,13 +302,15 @@ Model parameters:
 #| echo: true
 #| output: false
 
-N_max = 18000   # WSU total student body (KhudaBukhsh et al. (2020))
+N_max = 18000   # ≈ WSU student body (18,234 served by the campus health service; Vaidya et al. 2015)
 
 th = real_data[:th]         # Infection times
 K = sum(th)                 # Total infections
 delta = real_data[:delta]   # Recovery intervals
 cens  = real_data[:cens]    # Censoring
 nsteps = real_data[:nsteps] # Number of time steps
+
+N_grid = NGrid(K, K + 1, N_max)   # prior support of N, summed out in the likelihood
 ```
 
 ## Running the inference
@@ -307,34 +318,31 @@ nsteps = real_data[:nsteps] # Number of time steps
 ```{julia}
 #| echo: true
 #| output: false
-model = dsa_discrete_turing_multinomial_inferN(N_max, nsteps, K, th, delta, cens);
+model = dsa_discrete_turing_multinomial_inferN(N_grid, nsteps, K, th, delta, cens);
 
-n_samples  = 8000
-nuts_adapt = 2000
+n_samples  = 2000
+nuts_adapt = 1000
 n_chains   = 4
-σ_N        = 1000  # Discrete random walk for N with a window ±σ_N 
-N_proposal(vnt) = (n = vnt[@varname(N)];
-                   DiscreteUniform(max(K + 1, n - σ_N), min(N_max, n + σ_N)))
+sampler    = NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
+# Chains start from jittered data-based values (Methods): γ from the mean recorded recovery interval
+# (p_γ = 1/mean δ), β at R0 = 1 (N is unknown, so the final size cannot be used) and ρ at its prior median;
+# each value is multiplied by exp(0.1 z), z ~ N(0, 1), per chain.
+init_rng = Xoshiro(20261006)
+function data_inits(n)
+    pγ0 = 1 / mean(delta[.!cens]); γ0 = -log(1 - pγ0); ρh = median(Beta(1.0, 10.0))
+    j() = exp(0.1 * randn(init_rng))
+    [InitFromParams((β = j() * pγ0, γ = clamp(j() * γ0, 0.011, 0.99), ρ = j() * ρh)) for _ in 1:n]
+end
 
-gibbs_sampler = Gibbs(
-    :N => MH(:N => N_proposal),
-    (:β, :γ, :ρ) => NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
-)
+_ = sample(model, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
 
-# Different initial values per chain (wide range for N, small offsets for β/γ/ρ)
-# to improve exploration
-init_params_vec = [
-    (N = round(Int, 4_000 + 4_000 * (i - 1)),
-     β = 0.15 + 0.03 * (i - 1) / max(n_chains - 1, 1),
-     γ = 0.16 + 0.04 * (i - 1) / max(n_chains - 1, 1),
-     ρ = 0.03 + 0.03 * (i - 1) / max(n_chains - 1, 1))
-    for i in 1:n_chains
-]
+@time chain = sample(model, sampler, MCMCThreads(), n_samples, n_chains;
+                     progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains));
 
-_ = sample(model, gibbs_sampler, 1; progress=false, initial_params=init_params_vec[1])
-
-@time chain = sample(model, gibbs_sampler, MCMCThreads(), n_samples, n_chains;
-                     progress=false, initial_params=init_params_vec);
+# Posterior draws of N: one draw from P(N | K, τ) per MCMC draw, added to the chain as :N
+τ_draws = returned(model, chain)
+N_draws = [sample_N(N_grid, τ) for τ in τ_draws]
+chain   = hcat(chain, setrange(Chains(reshape(N_draws, size(N_draws, 1), 1, :), [:N]), range(chain)));
 ```
 
 ## Results
@@ -413,6 +421,13 @@ for (name, s) in pairs(posterior_table)
             "   95% CI = [", s.q025, ", ", s.q975, "]")
 end
 
+# 90% credible intervals, for comparison with the 90% intervals reported by KhudaBukhsh et al. (2020, Table 4)
+println()
+println("90% credible intervals:")
+for (name, v, dg) in (("N", N_chain, 0), ("β", β_chain, 4), ("γ", γ_chain, 4), ("ρ", ρ_chain, 4), ("R0", R0_chain, 3), ("IP_steps", IP_steps_chain, 2))
+    println(rpad(name, 10), "  median = ", round(median(v), digits=dg), "   90% CI = [", round(quantile(v, 0.05), digits=dg), ", ", round(quantile(v, 0.95), digits=dg), "]")
+end
+
 println()
 println("Convergence diagnostics:")
 ess_summary = MCMCDiagnosticTools.ess(chain)
@@ -462,8 +477,8 @@ p_recovery = histogram(delta, bins=100, alpha=0.7, label="Observed recovery inte
 
 # Add theoretical geometric distribution
 pγ_fitted = rate_to_proportion(γ_post)
-x_range = 0:maximum(delta)
-y_fitted = pdf.(Geometric(pγ_fitted), x_range) .* length(delta)
+x_range = 1:maximum(delta)
+y_fitted = pdf.(LocationScale(1, 1, Geometric(pγ_fitted)), x_range) .* length(delta)   # 1-indexed geometric
 plot!(p_recovery, x_range, y_fitted, label="Fitted", 
       color=:red, linewidth=3)
 
@@ -479,7 +494,7 @@ println("Total observed infections: $K")
 println("Inferred susceptible population (median): N̂ = $N_post")
 println("Mean recovery time (observed delta, hosp - onset): $(round(mean(real_data[:delta_original]), digits=2)) days")
 let pγ̂ = rate_to_proportion(γ_post)
-    println("Mean recovery delta (fitted, (1 - p_γ̂)/p_γ̂): $(round((1 - pγ̂)/pγ̂, digits=2)) days")
+    println("Mean recovery delta (fitted, 1/p_γ̂): $(round(1/pγ̂, digits=2)) days")
 end
 
 # Calculate infections fit 
@@ -491,9 +506,9 @@ println("Predicted total infections: $(round(predicted_infections, digits=1))")
 # Calculate recovery time fit
 observed_mean = mean(delta)
 let pγ̂ = rate_to_proportion(γ_post)
-    fitted_mean = (1 - pγ̂) / pγ̂ 
+    fitted_mean = 1 / pγ̂      # mean of the 1-indexed geometric
     recovery_fit_error = abs(observed_mean - fitted_mean) / observed_mean
-    println("Recovery delta fit error (observed vs (1-p_γ̂)/p_γ̂): $(round(recovery_fit_error * 100, digits=1))%")
+    println("Recovery delta fit error (observed vs 1/p_γ̂): $(round(recovery_fit_error * 100, digits=1))%")
 end
 ```
 
@@ -592,9 +607,148 @@ median = $(round(final_size_median, digits=0))
 95% CI = [$(round(final_size_ci[1], digits=0)), $(round(final_size_ci[2], digits=0))]")
 ```
 
+## Manuscript figure export
+
+```{julia}
+#| echo: false
+#| output: true
+#| label: fig-h1n1
+
+using Measures
+using PGFPlotsX
+# Render the saved PDF via LuaLaTeX so Unicode Greek glyphs (β, γ, ρ) are
+# embedded correctly instead of being substituted with '?'. GR's PDF writer
+# uses a bundled font without Greek; PGFPlotsX hands the figure to LaTeX,
+# whose default Computer Modern fully supports Greek.
+PGFPlotsX.latexengine!(PGFPlotsX.LUALATEX)
+pgfplotsx()
+
+let
+    # Posterior predictive epidemic curve: simulate from sub-sample of chain
+    n_draws    = min(500, length(β_chain))
+    sample_idx = round.(Int, range(1, length(β_chain); length=n_draws))
+    f_mat      = Matrix{Float64}(undef, nsteps, n_draws)
+    for (j, i) in enumerate(sample_idx)
+        _, τ_i, f_i = simulate(β_chain[i], γ_chain[i], ρ_chain[i], nsteps)
+        f_mat[:, j] = f_i .* τ_i .* N_chain[i]
+    end
+    f_lower  = [quantile(f_mat[t, :], 0.025) for t in 1:nsteps]
+    f_median = [quantile(f_mat[t, :], 0.50)  for t in 1:nsteps]
+    f_upper  = [quantile(f_mat[t, :], 0.975) for t in 1:nsteps]
+
+    # NOTE: we deliberately do NOT set `fontfamily` here. Setting it to a font
+    # without Greek glyphs (e.g. Helvetica) makes β/γ/ρ/δ render as missing
+    # boxes under both GR and pgfplotsx + LaTeX. Each backend's default font
+    # (GR's bundled font; LaTeX's Computer Modern via pgfplotsx) supports Greek.
+    default(guidefontsize  = 9,
+            tickfontsize   = 8,
+            legendfontsize = 7,
+            titlefontsize  = 10,
+            linewidth      = 1.5,
+            framestyle     = :box,
+            grid           = true,
+            gridlinewidth  = 0.3,
+            gridalpha      = 0.4,
+            gridcolor      = :gray,
+            gridstyle      = :dash)
+
+    p_curve = bar(1:nsteps, real_data[:th];
+                  label         = "Observed",
+                  color         = :lightgray,
+                  linecolor     = :gray,
+                  linewidth     = 0.3,
+                  bar_width     = 1.0,
+                  xlabel        = "Day",
+                  ylabel        = "Reported cases",
+                  title         = "(A) Posterior predictive epidemic curve",
+                  left_margin   = 6mm,
+                  right_margin  = 3mm,
+                  bottom_margin = 5mm,
+                  top_margin    = 2mm)
+    plot!(p_curve, 1:nsteps, f_median;
+          ribbon    = (f_median .- f_lower, f_upper .- f_median),
+          fillalpha = 0.4,
+          fillcolor = :steelblue,
+          lw        = 0,
+          label     = "95% CrI",
+          color     = :steelblue)
+    plot!(p_curve, 1:nsteps, f_median;
+          lw    = 2.5,
+          label = "Posterior median",
+          color = :steelblue)
+
+    # Thousands formatter for the N axis (avoids overlapping scientific notation).
+    fmt_thousands(x) = string(Int(round(x / 1000))) * "k"
+
+    p_N = histogram(N_chain;
+                    bins         = 40,
+                    normalize    = :pdf,
+                    color        = :steelblue,
+                    label        = "",
+                    xlabel       = "N",
+                    ylabel       = "density",
+                    title        = "(B) Susceptible population",
+                    xformatter   = fmt_thousands,
+                    left_margin  = 5mm,
+                    bottom_margin= 5mm,
+                    top_margin   = 2mm)
+    p_β = histogram(β_chain;
+                    bins         = 40,
+                    normalize    = :pdf,
+                    color        = :steelblue,
+                    label        = "",
+                    xlabel       = "β",
+                    ylabel       = "density",
+                    title        = "(C) Transmission rate",
+                    left_margin  = 5mm,
+                    bottom_margin= 5mm,
+                    top_margin   = 2mm)
+    p_γ = histogram(γ_chain;
+                    bins         = 40,
+                    normalize    = :pdf,
+                    color        = :steelblue,
+                    label        = "",
+                    xlabel       = "γ",
+                    ylabel       = "density",
+                    title        = "(D) Removal rate",
+                    left_margin  = 5mm,
+                    bottom_margin= 5mm,
+                    top_margin   = 2mm)
+    p_ρ = histogram(ρ_chain;
+                    bins         = 40,
+                    normalize    = :pdf,
+                    color        = :steelblue,
+                    label        = "",
+                    xlabel       = "ρ",
+                    ylabel       = "density",
+                    title        = "(E) Initial inf. fraction",
+                    left_margin  = 5mm,
+                    bottom_margin= 5mm,
+                    top_margin   = 2mm)
+
+    # Two-row layout: curve full-width on top, four histograms in a row below.
+    l = @layout [a{0.50h}; grid(1, 4)]
+    fig = plot(p_curve, p_N, p_β, p_γ, p_ρ;
+               layout           = l,
+               size             = (1400, 700),
+               dpi              = 300,
+               background_color = :white)
+
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
+    mkpath(figdir)
+    out = joinpath(figdir, "fig_h1n1.pdf")
+    savefig(fig, out)
+    println("Saved -> $out")
+    fig
+end
+
+# Restore GR as the default backend in case later cells or re-runs expect it.
+gr()
+```
+
 ## Discussion 
 
-The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed that the discrete SIR model, with geometric recovery times, captured the dynamics of the epidemic. The susceptible population $N$ has a posterior median of $9{,}143$ (95\% CI $[7{,}017,\,13{,}331]$), which overlaps the estimate of $7{,}051$ (90\% CI $[6{,}602,\,7{,}581]$) reported by KhudaBukhsh et al. (2020).
+The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed that the discrete SIR model, with geometric recovery times, captured the dynamics of the epidemic. The susceptible population $N$ has a posterior median of $11{,}664$ (95\% CI $[9{,}027,\,16{,}295]$), larger than the estimate of $7{,}051$ (90\% CI $[6{,}602,\,7{,}581]$) reported by KhudaBukhsh et al. (2020). The two analyses treat $N$ differently: here it enters through the Binomial final-size term and is summed out over a uniform prior, whereas KhudaBukhsh et al. impute it at each iteration as $n \sim \mathrm{NegBinom}(k, \tau)$ from the final-size equation and fix $\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.197$) and reproduction number ($R_0 = 1.01$, 95\% CI $[0.96,\,1.06]$) are close to theirs ($0.189$ and $1.06$), and the fitted mean infectious period ($5.12$ days) reproduces the mean recorded recovery interval.
 
 This approach offers several advantages: a simple and interpretable modelling framework, fast computation and inference through Turing.jl, and clear parameter interpretation (transmission rate β, recovery rate γ, and initial infected proportion ρ). However, it's important to note that the model relies on key assumptions, including geometric recovery times and the modification of the original dataset to include recovery intervals, as the primary data only contained daily infection counts.
 

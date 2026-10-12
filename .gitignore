@@ -1,0 +1,21 @@
+# OS and editor files
+.DS_Store
+.Rhistory
+
+# Quarto caches, logs and backups
+.cache/
+*.log
+*.pre_*
+
+# Rendered outputs: only .qmd, .md and figure-commonmark/ are tracked
+*.html
+*.pdf
+*.docx
+**/*_files/figure-html/
+**/*_files/figure-pdf/
+**/*_files/libs/
+**/*_files/mediabag/
+
+# Figure PDFs written by the notebooks, and folders that are not part of this repository
+figures/
+Supplementary_analyses/

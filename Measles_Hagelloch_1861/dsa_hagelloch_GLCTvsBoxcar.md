@@ -60,11 +60,12 @@ We use the four transmission parameters from NR’s model $M_\theta$:
 within-class 1 ($\beta_{C1}$), within-class 2 ($\beta_{C2}$), a
 household-route term from school to pre-school ($\beta_H$), and a global
 uniform-mixing term ($\beta_G$). The infectious period is shared across
-classes and modelled with a NegBin DPH. Inference uses a Gibbs scheme:
-$\beta_{C1}$, $\beta_{C2}$, $\beta_H$, $\beta_G$, and the calendar mean
-$\mathbb{E}[\delta]$ are updated jointly by one NUTS step; while the
-phase count $r$ and population sizes $N_0$, $N_1$, $N_2$ are updated by
-Metropolis–Hastings. We set $p = r/(\mathbb{E}[\delta]-\delta_{\min}+r)$
+classes and modelled with a NegBin DPH. Inference uses NUTS for
+$\beta_{C1}$, $\beta_{C2}$, $\beta_H$, $\beta_G$ and the calendar mean
+$\mathbb{E}[\delta]$. The integer-valued phase count $r$ and population
+sizes $N_0$, $N_1$, $N_2$ are summed out of the likelihood over their
+prior supports, and their posterior draws are recovered after sampling
+(see Inference). We set $p = r/(\mathbb{E}[\delta]-\delta_{\min}+r)$
 given $\mathbb{E}[\delta]$ and $r$. Calendar infectious period $\delta$
 includes NR’s fixed $+4$ days, so we prepend $(\delta_{\min}-r)$
 deterministic day-states to that DPH (with
@@ -108,24 +109,16 @@ using Random, LinearAlgebra
 import Statistics: mean, std, median, quantile
 using Distributions
 using Turing
-# Compatibility patch for Turing Gibbs/MH warmup copy behavior (needed for some versions of Turing).
-let Ti = Turing.Inference
-    if isdefined(Ti, :StoreLinkedValues)
-        Ty = getfield(Ti, :StoreLinkedValues)
-        @eval Base.copy(::$Ty) = $Ty()
-    end
-    if isdefined(Ti, :StoreUnspecifiedPriors)
-        Ty = getfield(Ti, :StoreUnspecifiedPriors)
-        @eval Base.copy(x::$Ty) = $Ty(copy(x.vns_with_proposal))
-    end
-end
+using MCMCChains   # sample(...; chain_type=MCMCChains.Chains)
 using StatsPlots, Plots
 using ForwardDiff
 using CSV, DataFrames
 using MCMCDiagnosticTools
 
-include("./PhaseTypeDistributions.jl")
+include("../PhaseTypeDistributions.jl")
 import .PhaseTypeDistributions
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 ```
 
 ``` julia
@@ -158,7 +151,8 @@ K0 = nrow(df0)
 K1 = nrow(df1)
 K2 = nrow(df2)
 
-# Census-based bounds from Neal & Roberts (2004): infer N0,N1,N2 from K0,K1,K2 with N_total=197.
+# Bounds from the 197 children under 14 recorded by Pfeilsticker (1863; as cited by Neal & Roberts 2004):
+# infer N0,N1,N2 from K0,K1,K2 with N_total=197.
 N_total = 197
 N0_max  = N_total - K1 - K2   # = 197 - 30 - 68 = 99
 N1_max  = N_total - K0 - K2   # = 197 - 90 - 68 = 39
@@ -244,27 +238,31 @@ feedback from class 0 to school classes.
 
 ``` julia
 """GLCT model (M_θ analogue).
-Propagates three phase-vectors using the exponential rate-to-probability force of infection"""
+Propagates three phase-vectors using the exponential rate-to-probability force of infection.
+All arrays are allocated once per call and updated in place."""
 function run_sir_mtheta(T_mat, alpha, beta_C1, beta_C2, beta_H, beta_G,
                          rho0, rho1, rho2, nsteps)
     T_el = promote_type(eltype(T_mat), eltype(alpha),
                         typeof(beta_C1), typeof(beta_C2),
                         typeof(beta_H),  typeof(beta_G),
                         typeof(rho0), typeof(rho1), typeof(rho2))
+    k  = length(alpha)
+    αT = T_el.(alpha)
 
-    S0 = one(T_el) - T_el(rho0);  x0 = T_el.(alpha) .* T_el(rho0)
-    S1 = one(T_el) - T_el(rho1);  x1 = T_el.(alpha) .* T_el(rho1)
-    S2 = one(T_el) - T_el(rho2);  x2 = T_el.(alpha) .* T_el(rho2)
+    S0 = one(T_el) - T_el(rho0);  x0 = αT .* T_el(rho0)
+    S1 = one(T_el) - T_el(rho1);  x1 = αT .* T_el(rho1)
+    S2 = one(T_el) - T_el(rho2);  x2 = αT .* T_el(rho2)
+    y0 = similar(x0);  y1 = similar(x1);  y2 = similar(x2)   # next-step buffers
 
-    S0_hist = T_el[S0]
-    S1_hist = T_el[S1]
-    S2_hist = T_el[S2]
+    S0_hist = Vector{T_el}(undef, nsteps + 1);  S0_hist[1] = S0
+    S1_hist = Vector{T_el}(undef, nsteps + 1);  S1_hist[1] = S1
+    S2_hist = Vector{T_el}(undef, nsteps + 1);  S2_hist[1] = S2
 
-    for _ in 1:nsteps
+    for t in 1:nsteps
         I0 = sum(x0);  I1 = sum(x1);  I2 = sum(x2)
         I_total = I0 + I1 + I2
 
-        # Forces of infection (M_θ) 
+        # Forces of infection (M_θ)
         # p = 1 − exp(−rate·Δt) with Δt=1; clamp to [0, Sk] for numerical safety
         r0 = T_el(beta_H) * (I1 + I2) + T_el(beta_G) * I_total
         r1 = T_el(beta_C1) * I1        + T_el(beta_G) * I_total
@@ -273,14 +271,18 @@ function run_sir_mtheta(T_mat, alpha, beta_C1, beta_C2, beta_H, beta_G,
         λ1 = min(max((one(T_el) - exp(-r1)) * S1, zero(T_el)), S1)
         λ2 = min(max((one(T_el) - exp(-r2)) * S2, zero(T_el)), S2)
 
-        x0 = T_mat' * x0 .+ T_el.(alpha) .* λ0
-        x1 = T_mat' * x1 .+ T_el.(alpha) .* λ1
-        x2 = T_mat' * x2 .+ T_el.(alpha) .* λ2
+        # y = T_matᵀ x + α λ, written as explicit loops (same order as T_mat' * x)
+        @inbounds for j in 1:k
+            a0 = T_mat[1, j] * x0[1];  a1 = T_mat[1, j] * x1[1];  a2 = T_mat[1, j] * x2[1]
+            for i in 2:k
+                a0 += T_mat[i, j] * x0[i];  a1 += T_mat[i, j] * x1[i];  a2 += T_mat[i, j] * x2[i]
+            end
+            y0[j] = a0 + αT[j] * λ0;  y1[j] = a1 + αT[j] * λ1;  y2[j] = a2 + αT[j] * λ2
+        end
+        x0, y0 = y0, x0;  x1, y1 = y1, x1;  x2, y2 = y2, x2
         S0 -= λ0;  S1 -= λ1;  S2 -= λ2
 
-        push!(S0_hist, S0)
-        push!(S1_hist, S1)
-        push!(S2_hist, S2)
+        S0_hist[t + 1] = S0;  S1_hist[t + 1] = S1;  S2_hist[t + 1] = S2
     end
 
     function to_pmf(S_hist)
@@ -334,8 +336,9 @@ function hazard_vector_from_dph(dph, K_age::Integer)
     return clamp.(h, zero(T), one(T))
 end
 
-"""Three-group SIR Boxcar map (M_θ analogue).
-Propagates three infection-age vectors using discrete hazard h_rec and the same exponential rate-to-probability force."""
+"""Boxcar model (M_θ analogue).
+Propagates three infection-age vectors using discrete hazard h_rec and the same exponential rate-to-probability force.
+All arrays are allocated once per call and updated in place."""
 function run_sir_mtheta_boxcar(h_rec, K_age::Int,
                                 beta_C1, beta_C2, beta_H, beta_G,
                                 rho0, rho1, rho2, nsteps::Int)
@@ -351,10 +354,16 @@ function run_sir_mtheta_boxcar(h_rec, K_age::Int,
     x0 = zeros(T_el, K_age);  x0[1] = T_el(rho0)
     x1 = zeros(T_el, K_age);  x1[1] = T_el(rho1)
     x2 = zeros(T_el, K_age);  x2[1] = T_el(rho2)
+    surv = Vector{T_el}(undef, K_age)                          # 1 − h[k], computed once
+    @inbounds for k in 1:K_age
+        surv[k] = one(T_el) - T_el(h_rec[k])
+    end
 
-    S0_hist = T_el[S0];  S1_hist = T_el[S1];  S2_hist = T_el[S2]
+    S0_hist = Vector{T_el}(undef, nsteps + 1);  S0_hist[1] = S0
+    S1_hist = Vector{T_el}(undef, nsteps + 1);  S1_hist[1] = S1
+    S2_hist = Vector{T_el}(undef, nsteps + 1);  S2_hist[1] = S2
 
-    for _ in 1:nsteps
+    for t in 1:nsteps
         I0 = sum(x0);  I1 = sum(x1);  I2 = sum(x2)
         I_total = I0 + I1 + I2
 
@@ -366,28 +375,20 @@ function run_sir_mtheta_boxcar(h_rec, K_age::Int,
         λ1 = min(max((one(T_el) - exp(-r1)) * S1, zero(T_el)), S1)
         λ2 = min(max((one(T_el) - exp(-r2)) * S2, zero(T_el)), S2)
 
-        x0_new = zeros(T_el, K_age)
-        x1_new = zeros(T_el, K_age)
-        x2_new = zeros(T_el, K_age)
-
-        # New infections enter age class 1
-        x0_new[1] += λ0;  x1_new[1] += λ1;  x2_new[1] += λ2
-
-        # Advance age classes; h[k] fraction absorbs (recovers), 1−h[k] advances
-        @inbounds for k in 1:(K_age - 1)
-            h_k = T_el(h_rec[k])
-            x0_new[k+1] += x0[k] * (one(T_el) - h_k)
-            x1_new[k+1] += x1[k] * (one(T_el) - h_k)
-            x2_new[k+1] += x2[k] * (one(T_el) - h_k)
-        end
+        # New infections enter age class 1; h[k] fraction absorbs (recovers), 1−h[k] advances.
         # k == K_age: h[K_age]=1, all remaining mass is absorbed
-
-        x0 = x0_new;  x1 = x1_new;  x2 = x2_new
+        # shift ages in place, from the oldest class down, so no second buffer is needed
+        @inbounds for k in (K_age - 1):-1:1
+            x0[k+1] = x0[k] * surv[k]
+            x1[k+1] = x1[k] * surv[k]
+            x2[k+1] = x2[k] * surv[k]
+        end
+        x0[1] = λ0;  x1[1] = λ1;  x2[1] = λ2
         S0 = max(zero(T_el), S0 - λ0)
         S1 = max(zero(T_el), S1 - λ1)
         S2 = max(zero(T_el), S2 - λ2)
 
-        push!(S0_hist, S0);  push!(S1_hist, S1);  push!(S2_hist, S2)
+        S0_hist[t + 1] = S0;  S1_hist[t + 1] = S1;  S2_hist[t + 1] = S2
     end
 
     function to_pmf(S_hist)
@@ -410,14 +411,25 @@ end
 
 # Inference
 
-Inference uses a Gibbs scheme: $\beta_{C1}$, $\beta_{C2}$, $\beta_H$,
-$\beta_G$, $\mathbb{E}[\delta]$ are updated jointly by one NUTS step,
-while the four discrete parameters (nb_r, $N_0$, $N_1$, $N_2$) are
-sampled by Metropolis–Hastings (NegBin–DPH with Neal–Roberts offset).
-The epidemic is seeded by a single index case in Class 2
-($\rho_2 = 1/N_2$) with no initial infections in Classes 0 or 1
-($\rho_0 = \rho_1 = 0$), consistent with the Hagelloch data where the
-first recorded case belongs to Class 2.
+The model has four integer-valued parameters: the phase count nb_r of
+the NegBin–DPH (with Neal–Roberts offset) and the group sizes $N_0$,
+$N_1$, $N_2$. Instead of sampling them, we sum them out of the
+likelihood over their prior supports, using the shared
+`IntegerParameters.jl` helpers. The discrete-time model and its
+likelihood are unchanged. $N_0$ and $N_1$ enter only their Binomial
+final-size terms, so each is summed with `marginal_N_loglik`. $N_2$ also
+sets the seed $\rho_2 = 1/N_2$, and nb_r changes the DPH, so these two
+change the forward map and are summed jointly over their $4 \times 10$
+grid with `marginal_r_loglik` (one forward-map run per combination; the
+40 runs are evaluated in parallel with `threaded = true`, which does not
+change the results). NUTS then samples the real-valued parameters
+$\beta_{C1}$, $\beta_{C2}$, $\beta_H$, $\beta_G$ and
+$\mathbb{E}[\delta]$, and posterior draws of the four integer parameters
+are recovered afterwards from their exact conditional distributions. The
+epidemic is seeded by a single index case in Class 2 ($\rho_2 = 1/N_2$)
+with no initial infections in Classes 0 or 1 ($\rho_0 = \rho_1 = 0$),
+consistent with the Hagelloch data where the first recorded case belongs
+to Class 2.
 
 The group population sizes are not recoverable from `hagelloch.csv`,
 which records only the 188 infected individuals. All three susceptible
@@ -462,37 +474,23 @@ end
 
 # Infectious period: offset NegBin DPH with minimum δ_floor.
 
-@model function ddsa_hagelloch_mtheta(K0::Int, K1::Int, K2::Int,
-                                       N0_max::Int, N1_max::Int, N2_max::Int,
-                                       th0::Vector{Int}, th1::Vector{Int},
-                                       th2::Vector{Int},
-                                       delta::Vector{Int},
-                                       nsteps::Int,
-                                       δ_floor::Int)
-    # Priors — population sizes inferred within census-derived bounds
-    N0 ~ DiscreteUniform(K0, N0_max)
-    N1 ~ DiscreteUniform(K1, N1_max)
-    N2 ~ DiscreteUniform(K2, N2_max)
+# Forward maps with the transmission rates fixed, as functions of the DPH and the class-2 seed ρ2.
+# Index case in class 2: ρ0 = ρ1 = 0.
+glct_propagate(beta_C1, beta_C2, beta_H, beta_G) =
+    (dph, rho2) -> run_sir_mtheta(dph.S, dph.α, beta_C1, beta_C2, beta_H, beta_G,
+                                  0.0, 0.0, rho2, nsteps)
+boxcar_propagate(beta_C1, beta_C2, beta_H, beta_G) =
+    (dph, rho2) -> run_sir_mtheta_boxcar(hazard_vector_from_dph(dph, K_age_boxcar), K_age_boxcar,
+                                         beta_C1, beta_C2, beta_H, beta_G, 0.0, 0.0, rho2, nsteps)
 
-    # Index case in class 2; rho2 seeds one case out of N2 susceptibles
-    rho0 = 0.0
-    rho1 = 0.0
-    rho2 = 1.0 / N2
-
-    # Exponential priors to avoid near-zero-rate initialisation.
-    beta_C1 ~ Exponential(0.2)
-    beta_C2 ~ Exponential(0.1)
-    beta_H  ~ Exponential(0.1)
-    beta_G  ~ Exponential(0.1)
-    # Reparameterise (r, p) by mean δ for better Gibbs/NUTS geometry.
-    mean_δ ~ Uniform(δ_floor + 0.5, 25.0)
-    nb_r ~ DiscreteUniform(1, nb_r_max)
+"""Log-likelihood for one (nb_r, N2) combination, with N0 and N1 summed out of their
+Binomial final-size terms. Shared by the GLCT and Boxcar models, which differ only in
+`propagate`. Also returns the class 0 and 1 attack rates, used to draw N0 and N1."""
+function hagelloch_cell(propagate, nb_r, N2, mean_δ, δ_floor,
+                        N0_grid, N1_grid, K2, th0, th1, th2, delta)
     nb_p = nb_r / (mean_δ - δ_floor + nb_r)
-
-    dph = PhaseTypeDistributions.dph_negative_binomial_min_support(nb_r, nb_p, δ_floor)
-
-    sim = run_sir_mtheta(dph.S, dph.α, beta_C1, beta_C2, beta_H, beta_G,
-                          rho0, rho1, rho2, nsteps)
+    dph  = PhaseTypeDistributions.dph_negative_binomial_min_support(nb_r, nb_p, δ_floor)
+    sim  = propagate(dph, 1.0 / N2)   # rho2 seeds one case out of N2 susceptibles
 
     tau0 = clamp(sim.tau0, 0.001, 0.999)
     tau1 = clamp(sim.tau1, 0.001, 0.999)
@@ -502,177 +500,163 @@ end
     f1 = safe_normalise(sim.f1, nsteps)
     f2 = safe_normalise(sim.f2, nsteps)
 
-    # Binomial final-size constraints for all three groups
-    K0 ~ Binomial(N0, tau0)
-    K1 ~ Binomial(N1, tau1)
-    K2 ~ Binomial(N2, tau2)
+    # Binomial final-size constraints (N0 and N1 summed over their prior supports)
+    ll = marginal_N_loglik(N0_grid, tau0) + marginal_N_loglik(N1_grid, tau1) +
+         logpdf(Binomial(N2, tau2), K2)
 
     # Infection-time histograms
-    if K0 > 0 && all(isfinite, f0) && abs(sum(f0) - 1) < 0.01
-        th0 ~ Multinomial(K0, f0)
-    else
-        Turing.@addlogprob! -Inf
-    end
-    if K1 > 0 && all(isfinite, f1) && abs(sum(f1) - 1) < 0.01
-        th1 ~ Multinomial(K1, f1)
-    else
-        Turing.@addlogprob! -Inf
-    end
-    if K2 > 0 && all(isfinite, f2) && abs(sum(f2) - 1) < 0.01
-        th2 ~ Multinomial(K2, f2)
-    else
-        Turing.@addlogprob! -Inf
+    for (K, f, th) in ((N0_grid.K, f0, th0), (N1_grid.K, f1, th1), (K2, f2, th2))
+        (K > 0 && all(isfinite, f) && abs(sum(f) - 1) < 0.01) || return (ll = -Inf, tau0 = tau0, tau1 = tau1)
+        ll += logpdf(Multinomial(K, f), th)
     end
 
     # Shared NegBin DPH recovery likelihood
-    n_δ = length(delta)
-    for i in 1:n_δ
-        delta[i] ~ dph
+    ll += sum(logpdf(dph, d) for d in delta)
+    return (ll = ll, tau0 = tau0, tau1 = tau1)
+end
+
+@model function ddsa_hagelloch_mtheta(N0_grid::NGrid, N1_grid::NGrid, K2::Int, cells,
+                                       th0::Vector{Int}, th1::Vector{Int},
+                                       th2::Vector{Int},
+                                       delta::Vector{Int},
+                                       δ_floor::Int)
+    # Priors. N0, N1 (NGrid) and (nb_r, N2) (cells) are summed out below, with
+    # N_k ~ DiscreteUniform(K_k, N_k,max) and nb_r ~ DiscreteUniform(1, nb_r_max).
+    # Exponential priors to avoid near-zero-rate initialisation.
+    beta_C1 ~ Exponential(0.2)
+    beta_C2 ~ Exponential(0.1)
+    beta_H  ~ Exponential(0.1)
+    beta_G  ~ Exponential(0.1)
+    # Reparameterise (r, p) by mean δ, so p = r/(mean δ − δ_floor + r) keeps its meaning across r.
+    mean_δ ~ Uniform(δ_floor + 0.5, 25.0)
+
+    propagate = glct_propagate(beta_C1, beta_C2, beta_H, beta_G)
+    # threaded: the 40 (nb_r, N2) forward-map runs are evaluated as parallel tasks
+    logmarg, lps = marginal_r_loglik(cells; threaded = true) do (nb_r, N2)
+        hagelloch_cell(propagate, nb_r, N2, mean_δ, δ_floor,
+                       N0_grid, N1_grid, K2, th0, th1, th2, delta).ll
     end
+    Turing.@addlogprob! logmarg
+    return lps   # per-(nb_r, N2) log-likelihoods, used to draw the integer parameters
 end
 ```
 
 ## Boxcar Turing model
 
 ``` julia
-@model function ddsa_hagelloch_mtheta_boxcar(K0::Int, K1::Int, K2::Int,
-                                              N0_max::Int, N1_max::Int, N2_max::Int,
+@model function ddsa_hagelloch_mtheta_boxcar(N0_grid::NGrid, N1_grid::NGrid, K2::Int, cells,
                                               th0::Vector{Int}, th1::Vector{Int},
                                               th2::Vector{Int},
                                               delta::Vector{Int},
-                                              nsteps::Int,
-                                              δ_floor::Int,
-                                              K_age::Int)
-    N0 ~ DiscreteUniform(K0, N0_max)
-    N1 ~ DiscreteUniform(K1, N1_max)
-    N2 ~ DiscreteUniform(K2, N2_max)
-
-    rho0 = 0.0;  rho1 = 0.0;  rho2 = 1.0 / N2
-
+                                              δ_floor::Int)
     beta_C1 ~ Exponential(0.2)
     beta_C2 ~ Exponential(0.1)
     beta_H  ~ Exponential(0.1)
     beta_G  ~ Exponential(0.1)
     mean_δ  ~ Uniform(δ_floor + 0.5, 25.0)
-    nb_r    ~ DiscreteUniform(1, nb_r_max)
-    nb_p    = nb_r / (mean_δ - δ_floor + nb_r)
 
-    dph   = PhaseTypeDistributions.dph_negative_binomial_min_support(nb_r, nb_p, δ_floor)
-    h_rec = hazard_vector_from_dph(dph, K_age)
-
-    sim  = run_sir_mtheta_boxcar(h_rec, K_age, beta_C1, beta_C2, beta_H, beta_G,
-                                  rho0, rho1, rho2, nsteps)
-
-    tau0 = clamp(sim.tau0, 0.001, 0.999)
-    tau1 = clamp(sim.tau1, 0.001, 0.999)
-    tau2 = clamp(sim.tau2, 0.001, 0.999)
-
-    f0 = safe_normalise(sim.f0, nsteps)
-    f1 = safe_normalise(sim.f1, nsteps)
-    f2 = safe_normalise(sim.f2, nsteps)
-
-    K0 ~ Binomial(N0, tau0)
-    K1 ~ Binomial(N1, tau1)
-    K2 ~ Binomial(N2, tau2)
-
-    if K0 > 0 && all(isfinite, f0) && abs(sum(f0) - 1) < 0.01
-        th0 ~ Multinomial(K0, f0)
-    else
-        Turing.@addlogprob! -Inf
+    # Same likelihood as the GLCT model; only the forward map differs.
+    propagate = boxcar_propagate(beta_C1, beta_C2, beta_H, beta_G)
+    # threaded: the 40 (nb_r, N2) forward-map runs are evaluated as parallel tasks
+    logmarg, lps = marginal_r_loglik(cells; threaded = true) do (nb_r, N2)
+        hagelloch_cell(propagate, nb_r, N2, mean_δ, δ_floor,
+                       N0_grid, N1_grid, K2, th0, th1, th2, delta).ll
     end
-    if K1 > 0 && all(isfinite, f1) && abs(sum(f1) - 1) < 0.01
-        th1 ~ Multinomial(K1, f1)
-    else
-        Turing.@addlogprob! -Inf
-    end
-    if K2 > 0 && all(isfinite, f2) && abs(sum(f2) - 1) < 0.01
-        th2 ~ Multinomial(K2, f2)
-    else
-        Turing.@addlogprob! -Inf
-    end
-
-    # Recovery likelihood: same offset DPH PMF 
-    n_δ = length(delta)
-    for i in 1:n_δ
-        delta[i] ~ dph
-    end
+    Turing.@addlogprob! logmarg
+    return lps
 end
 ```
 
 ## Sampler
 
-Both models use an identical sampler configuration: independence
-Metropolis–Hastings for `nb_r`, one joint Metropolis–Hastings block for
-($N_0$, $N_1$, $N_2$), and one joint NUTS step for the five continuous
-parameters ($\beta_{C1}$, $\beta_{C2}$, $\beta_H$, $\beta_G$, `mean_δ`)
-each full Gibbs sweep. Four parallel chains are run with cold starts
-(initial `nb_r` spread over $\{1,\ldots,4\}$; moderate $\beta$’s and
-`mean_δ`).
+Both models use an identical sampler configuration: one NUTS sampler for
+the five real-valued parameters ($\beta_{C1}$, $\beta_{C2}$, $\beta_H$,
+$\beta_G$, `mean_δ`), with target acceptance 0.8 and four parallel
+chains started from jittered data-based values. The integer parameters
+are summed out of the likelihood (see above), so no Gibbs or
+Metropolis–Hastings steps are needed. After sampling, each MCMC draw is
+paired with one draw of (nb_r, $N_2$) from its exact conditional
+posterior, and then one draw each of $N_0$ and $N_1$ given the resulting
+attack rates. These are added to the chain as `:nb_r`, `:N0`, `:N1` and
+`:N2`.
+
+``` julia
+n_samples  = 2000
+nuts_adapt = 1000
+n_chains   = 4
+sampler    = NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
+# Chains start from jittered data-based values (Methods): the mean infectious period at the mean recorded
+# duration, and the four transmission rates at their prior medians; each value is multiplied by exp(0.1 z),
+# z ~ N(0, 1), per chain.
+init_rng = Xoshiro(20261006)
+function data_inits(n)
+    j() = exp(0.1 * randn(init_rng)); md = mean(delta)
+    [InitFromParams((beta_C1 = j() * median(Exponential(0.2)), beta_C2 = j() * median(Exponential(0.1)),
+                     beta_H = j() * median(Exponential(0.1)), beta_G = j() * median(Exponential(0.1)),
+                     mean_δ = clamp(j() * md, minimum(delta) + 0.6, 24.9))) for _ in 1:n]
+end
+
+# Prior supports of the integer parameters, summed out in the likelihood
+δ_floor_ip = minimum(delta)
+N0_grid = NGrid(K0, K0, N0_max)                              # N0 ~ DiscreteUniform(K0, N0_max)
+N1_grid = NGrid(K1, K1, N1_max)                              # N1 ~ DiscreteUniform(K1, N1_max)
+cells   = vec(collect(Iterators.product(1:nb_r_max, K2:N2_max)))   # (nb_r, N2) grid
+
+"""Add posterior draws of nb_r, N0, N1 and N2 to `chain`: for each MCMC draw, sample
+(nb_r, N2) from its exact conditional posterior, then N0 and N1 given the attack rates."""
+function add_integer_draws(model, chain, make_propagate)
+    lps_draws = returned(model, chain)
+    n_iter, n_ch = size(lps_draws)
+    draws = zeros(Int, n_iter, 4, n_ch)
+    for c in 1:n_ch, i in 1:n_iter
+        nb_r, N2 = cells[sample_index(lps_draws[i, c])]
+        β = [chain[s][i, c] for s in (:beta_C1, :beta_C2, :beta_H, :beta_G)]
+        cell = hagelloch_cell(make_propagate(β...), nb_r, N2, chain[:mean_δ][i, c], δ_floor_ip,
+                              N0_grid, N1_grid, K2, th0, th1, th2, delta)
+        draws[i, :, c] = [nb_r, sample_N(N0_grid, cell.tau0), sample_N(N1_grid, cell.tau1), N2]
+    end
+    return hcat(chain, setrange(Chains(draws, [:nb_r, :N0, :N1, :N2]), range(chain)))
+end
+```
 
 **GLCT**
 
 ``` julia
-n_samples  = 20_000
-nuts_adapt = 2_000
-n_chains   = 4
-
-gibbs_sampler   = Gibbs(
-    :nb_r    => MH(:nb_r => DiscreteUniform(1, nb_r_max)),
-    (:N0, :N1, :N2) =>
-        MH(:N0 => DiscreteUniform(K0, N0_max),
-           :N1 => DiscreteUniform(K1, N1_max),
-           :N2 => DiscreteUniform(K2, N2_max)),
-    (:beta_C1, :beta_C2, :beta_H, :beta_G, :mean_δ) => NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
-)
-
-delta_bar = mean(delta)
-# Spread initial β_C2 across chains so cold starts are less likely to lock all chains in the same ridge.
-init_params_vec = [
-    (nb_r = i,
-     mean_δ = delta_bar,
-     N0 = K0 + 5, N1 = K1 + 5, N2 = K2 + 5,
-     beta_C1 = 0.2, beta_C2 = 0.05 + 0.05 * (i - 1), beta_H = 0.1, beta_G = 0.1)
-    for i in 1:n_chains
-]
-```
-
-``` julia
-δ_floor_ip = minimum(delta)
-model_mtheta = ddsa_hagelloch_mtheta(K0, K1, K2, N0_max, N1_max, N2_max,
-                                      th0, th1, th2, delta, nsteps, δ_floor_ip)
+model_mtheta = ddsa_hagelloch_mtheta(N0_grid, N1_grid, K2, cells,
+                                      th0, th1, th2, delta, δ_floor_ip)
 
 # Warm-up sample to trigger JIT
-_ = sample(model_mtheta, gibbs_sampler, 1;
-           progress=false, initial_params=init_params_vec[1])
+_ = sample(model_mtheta, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
 
-chain = sample(model_mtheta, gibbs_sampler, MCMCThreads(), n_samples, n_chains;
-               progress=false, initial_params=init_params_vec)
+chain = sample(model_mtheta, sampler, MCMCThreads(), n_samples, n_chains;
+               progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains))
+chain = add_integer_draws(model_mtheta, chain, glct_propagate)
 ```
 
-    Chains MCMC chain (20000×12×4 Array{Float64, 3}):
+    Chains MCMC chain (2000×23×4 Array{Float64, 3}):
 
-    Iterations        = 1:1:20000
+    Iterations        = 1001:1:3000
     Number of chains  = 4
-    Samples per chain = 20000
-    Wall duration     = 113.92 seconds
-    Compute duration  = 438.39 seconds
-    parameters        = N0, N1, N2, beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r
-    internals         = logprior, loglikelihood, logjoint
+    Samples per chain = 2000
+    Wall duration     = 286.05 seconds
+    Compute duration  = 1130.7 seconds
+    parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
+    internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
     Summary Statistics
 
-      parameters      mean       std      mcse    ess_bulk     ess_tail      rhat  ⋯
-          Symbol   Float64   Float64   Float64     Float64      Float64   Float64  ⋯
+      parameters      mean       std      mcse    ess_bulk    ess_tail      rhat   ⋯
+          Symbol   Float64   Float64   Float64     Float64     Float64   Float64   ⋯
 
-              N0   98.4736    0.8422    0.0239   1086.4295          NaN    1.0035  ⋯
-              N1   34.0093    2.0787    0.0682    935.1152     991.6362    1.0042  ⋯
-              N2   76.6068    0.7031    0.0192   1221.6998          NaN    1.0010  ⋯
-         beta_C1    0.1273    0.0362    0.0020    337.5476     264.6465    1.0187  ⋯
-         beta_C2    0.0315    0.0220    0.0013    223.6748     194.5032    1.0588  ⋯
-          beta_H    0.0206    0.0142    0.0008    229.6769     231.4739    1.0920  ⋯
-          beta_G    0.0598    0.0083    0.0005    248.8292     275.1339    1.0519  ⋯
-          mean_δ    8.3618    0.2241    0.0030   5425.2417   11702.9635    1.0004  ⋯
-            nb_r    3.9993    0.0302    0.0003   7470.9684          NaN    1.0003  ⋯
+         beta_C1    0.1164    0.0354    0.0007   2326.9100   2127.7645    1.0032   ⋯
+         beta_C2    0.0255    0.0199    0.0004   2205.6167   2787.3116    1.0024   ⋯
+          beta_H    0.0155    0.0128    0.0003   2429.1378   2693.1533    1.0015   ⋯
+          beta_G    0.0629    0.0077    0.0002   1903.9150   1852.2920    1.0032   ⋯
+          mean_δ    8.3600    0.2245    0.0037   3740.5520   4044.0375    1.0004   ⋯
+            nb_r    4.0000    0.0000       NaN         NaN         NaN       NaN   ⋯
+              N0   98.4433    0.8717    0.0098   8008.4883         NaN    0.9998   ⋯
+              N1   34.0989    2.1186    0.0265   6451.2862   7621.2576    1.0001   ⋯
+              N2   76.5657    0.7594    0.0084   8218.7280         NaN    0.9998   ⋯
 
                                                                     1 column omitted
 
@@ -681,74 +665,53 @@ chain = sample(model_mtheta, gibbs_sampler, MCMCThreads(), n_samples, n_chains;
       parameters      2.5%     25.0%     50.0%     75.0%     97.5% 
           Symbol   Float64   Float64   Float64   Float64   Float64 
 
-              N0   96.0000   98.0000   99.0000   99.0000   99.0000
-              N1   31.0000   32.0000   34.0000   35.0000   38.0000
-              N2   75.0000   76.0000   77.0000   77.0000   77.0000
-         beta_C1    0.0506    0.1045    0.1282    0.1516    0.1956
-         beta_C2    0.0021    0.0147    0.0271    0.0433    0.0856
-          beta_H    0.0023    0.0095    0.0178    0.0291    0.0543
-          beta_G    0.0413    0.0549    0.0607    0.0655    0.0740
-          mean_δ    7.9386    8.2074    8.3572    8.5112    8.8144
+         beta_C1    0.0412    0.0937    0.1174    0.1407    0.1831
+         beta_C2    0.0010    0.0099    0.0210    0.0366    0.0746
+          beta_H    0.0006    0.0056    0.0124    0.0218    0.0479
+          beta_G    0.0451    0.0584    0.0638    0.0683    0.0759
+          mean_δ    7.9451    8.2024    8.3537    8.5090    8.8152
             nb_r    4.0000    4.0000    4.0000    4.0000    4.0000
+              N0   96.0000   98.0000   99.0000   99.0000   99.0000
+              N1   30.0000   33.0000   34.0000   36.0000   39.0000
+              N2   75.0000   76.0000   77.0000   77.0000   77.0000
 
 **Boxcar**
 
 ``` julia
-gibbs_boxcar = Gibbs(
-    :nb_r    => MH(:nb_r => DiscreteUniform(1, nb_r_max)),
-    (:N0, :N1, :N2) =>
-        MH(:N0 => DiscreteUniform(K0, N0_max),
-           :N1 => DiscreteUniform(K1, N1_max),
-           :N2 => DiscreteUniform(K2, N2_max)),
-    (:beta_C1, :beta_C2, :beta_H, :beta_G, :mean_δ) =>
-        NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
-)
+model_boxcar = ddsa_hagelloch_mtheta_boxcar(N0_grid, N1_grid, K2, cells,
+                                             th0, th1, th2, delta, δ_floor_ip)
 
-init_params_bc = [
-    (nb_r = i,
-     mean_δ = delta_bar,
-     N0 = K0 + 5, N1 = K1 + 5, N2 = K2 + 5,
-     beta_C1 = 0.2, beta_C2 = 0.05 + 0.05 * (i - 1), beta_H = 0.1, beta_G = 0.1)
-    for i in 1:n_chains
-]
+_ = sample(model_boxcar, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
+
+chain_bc = sample(model_boxcar, sampler, MCMCThreads(), n_samples, n_chains;
+                  progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains))
+chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
 ```
 
-``` julia
-model_boxcar = ddsa_hagelloch_mtheta_boxcar(K0, K1, K2, N0_max, N1_max, N2_max,
-                                             th0, th1, th2, delta, nsteps,
-                                             δ_floor_ip, K_age_boxcar)
+    Chains MCMC chain (2000×23×4 Array{Float64, 3}):
 
-_ = sample(model_boxcar, gibbs_boxcar, 1;
-           progress=false, initial_params=init_params_bc[1])
-
-chain_bc = sample(model_boxcar, gibbs_boxcar, MCMCThreads(), n_samples, n_chains;
-                  progress=false, initial_params=init_params_bc)
-```
-
-    Chains MCMC chain (20000×12×4 Array{Float64, 3}):
-
-    Iterations        = 1:1:20000
+    Iterations        = 1001:1:3000
     Number of chains  = 4
-    Samples per chain = 20000
-    Wall duration     = 142.32 seconds
-    Compute duration  = 525.31 seconds
-    parameters        = N0, N1, N2, beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r
-    internals         = logprior, loglikelihood, logjoint
+    Samples per chain = 2000
+    Wall duration     = 341.23 seconds
+    Compute duration  = 1327.91 seconds
+    parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
+    internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
     Summary Statistics
 
-      parameters      mean       std      mcse     ess_bulk     ess_tail      rhat ⋯
-          Symbol   Float64   Float64   Float64      Float64      Float64   Float64 ⋯
+      parameters      mean       std      mcse    ess_bulk    ess_tail      rhat   ⋯
+          Symbol   Float64   Float64   Float64     Float64     Float64   Float64   ⋯
 
-              N0   98.3954    0.8939    0.0214    1495.5551          NaN    1.0033 ⋯
-              N1   34.0935    2.1558    0.0634    1218.8205    1604.2959    1.0054 ⋯
-              N2   76.5513    0.7646    0.0184    1478.8069          NaN    1.0014 ⋯
-         beta_C1    0.1244    0.0335    0.0017     383.2430     449.3048    1.0243 ⋯
-         beta_C2    0.0293    0.0233    0.0015     204.0762     191.6891    1.0915 ⋯
-          beta_H    0.0209    0.0128    0.0007     242.4354     289.1144    1.0600 ⋯
-          beta_G    0.0603    0.0078    0.0005     253.8788     433.8472    1.0587 ⋯
-          mean_δ    8.3541    0.2248    0.0029    5844.4537   11809.4201    1.0002 ⋯
-            nb_r    3.9996    0.0255    0.0002   16027.3532          NaN    1.0002 ⋯
+         beta_C1    0.1176    0.0372    0.0009   1767.7906   1640.7469    1.0041   ⋯
+         beta_C2    0.0268    0.0209    0.0005   1660.0152   2502.0872    1.0021   ⋯
+          beta_H    0.0162    0.0132    0.0003   2037.9351   2589.1347    1.0037   ⋯
+          beta_G    0.0625    0.0081    0.0002   1551.7200   1595.0287    1.0044   ⋯
+          mean_δ    8.3601    0.2209    0.0033   4444.8425   4423.8798    1.0005   ⋯
+            nb_r    3.9999    0.0112    0.0001   8016.0481         NaN    1.0000   ⋯
+              N0   98.4205    0.8894    0.0100   7922.5611         NaN    0.9999   ⋯
+              N1   34.0478    2.1176    0.0252   7125.3017   7607.6983    1.0003   ⋯
+              N2   76.5498    0.7532    0.0083   8261.9266         NaN    1.0005   ⋯
 
                                                                     1 column omitted
 
@@ -757,15 +720,15 @@ chain_bc = sample(model_boxcar, gibbs_boxcar, MCMCThreads(), n_samples, n_chains
       parameters      2.5%     25.0%     50.0%     75.0%     97.5% 
           Symbol   Float64   Float64   Float64   Float64   Float64 
 
-              N0   96.0000   98.0000   99.0000   99.0000   99.0000
-              N1   31.0000   32.0000   34.0000   36.0000   39.0000
-              N2   74.0000   76.0000   77.0000   77.0000   77.0000
-         beta_C1    0.0611    0.1009    0.1235    0.1468    0.1928
-         beta_C2    0.0007    0.0093    0.0255    0.0437    0.0837
-          beta_H    0.0044    0.0113    0.0180    0.0275    0.0522
-          beta_G    0.0419    0.0561    0.0614    0.0658    0.0726
-          mean_δ    7.9348    8.1991    8.3471    8.5027    8.8138
+         beta_C1    0.0392    0.0936    0.1183    0.1429    0.1885
+         beta_C2    0.0011    0.0105    0.0221    0.0383    0.0790
+          beta_H    0.0005    0.0058    0.0131    0.0234    0.0492
+          beta_G    0.0433    0.0578    0.0636    0.0681    0.0760
+          mean_δ    7.9401    8.2097    8.3569    8.5075    8.8026
             nb_r    4.0000    4.0000    4.0000    4.0000    4.0000
+              N0   96.0000   98.0000   99.0000   99.0000   99.0000
+              N1   30.0000   32.0000   34.0000   35.0000   38.0000
+              N2   75.0000   76.0000   77.0000   77.0000   77.0000
 
 # Results
 
@@ -780,15 +743,15 @@ chain_bc = sample(model_boxcar, gibbs_boxcar, MCMCThreads(), n_samples, n_chains
       parameters         ess      rhat   ess_per_sec 
           Symbol     Float64   Float64       Float64 
 
-              N0   1086.4295    1.0035        2.4782
-              N1    935.1152    1.0042        2.1331
-              N2   1221.6998    1.0010        2.7868
-         beta_C1    337.5476    1.0187        0.7700
-         beta_C2    223.6748    1.0588        0.5102
-          beta_H    229.6769    1.0920        0.5239
-          beta_G    248.8292    1.0519        0.5676
-          mean_δ   5425.2417    1.0004       12.3755
-            nb_r   7470.9684    1.0003       17.0420
+         beta_C1   2326.9100    1.0032        2.0579
+         beta_C2   2205.6167    1.0024        1.9507
+          beta_H   2429.1378    1.0015        2.1484
+          beta_G   1903.9150    1.0032        1.6838
+          mean_δ   3740.5520    1.0004        3.3082
+            nb_r         NaN       NaN           NaN
+              N0   8008.4883    0.9998        7.0828
+              N1   6451.2862    1.0001        5.7056
+              N2   8218.7280    0.9998        7.2687
 
 **Boxcar**
 
@@ -796,69 +759,69 @@ chain_bc = sample(model_boxcar, gibbs_boxcar, MCMCThreads(), n_samples, n_chains
 
     ESS/R-hat
 
-      parameters          ess      rhat   ess_per_sec 
-          Symbol      Float64   Float64       Float64 
+      parameters         ess      rhat   ess_per_sec 
+          Symbol     Float64   Float64       Float64 
 
-              N0    1495.5551    1.0033        2.8470
-              N1    1218.8205    1.0054        2.3202
-              N2    1478.8069    1.0014        2.8151
-         beta_C1     383.2430    1.0243        0.7296
-         beta_C2     204.0762    1.0915        0.3885
-          beta_H     242.4354    1.0600        0.4615
-          beta_G     253.8788    1.0587        0.4833
-          mean_δ    5844.4537    1.0002       11.1257
-            nb_r   16027.3532    1.0002       30.5103
+         beta_C1   1767.7906    1.0041        1.3313
+         beta_C2   1660.0152    1.0021        1.2501
+          beta_H   2037.9351    1.0037        1.5347
+          beta_G   1551.7200    1.0044        1.1685
+          mean_δ   4444.8425    1.0005        3.3472
+            nb_r   8016.0481    1.0000        6.0366
+              N0   7922.5611    0.9999        5.9662
+              N1   7125.3017    1.0003        5.3658
+              N2   8261.9266    1.0005        6.2218
 
 ## Posterior summaries
 
 GLCT posterior medians:
 
-    β_C1 median = 0.1282  (mean 0.1273; within-class 1)
-    β_C2 median = 0.0271  (mean 0.0315; within-class 2)
-    β_H median = 0.0178  (mean 0.0206; household: school → class 0)
-    β_G median = 0.0607  (mean 0.0598; global uniform mixing)
-    nb_r  = 4,  nb_p = 0.479 (derived),  mean δ = 8.36 d  (joint NUTS on β's + mean_δ; δ_floor=4),  CV = 0.361
+    β_C1 median = 0.1174  (mean 0.1164; within-class 1)
+    β_C2 median = 0.021  (mean 0.0255; within-class 2)
+    β_H median = 0.0124  (mean 0.0155; household: school → class 0)
+    β_G median = 0.0638  (mean 0.0629; global uniform mixing)
+    nb_r  = 4,  nb_p = 0.479 (derived),  mean δ = 8.35 d  (joint NUTS on β's + mean_δ; δ_floor=4),  CV = 0.361
     N0 = 99 (K0=90)  prior: [90, 99]
     N1 = 34 (K1=30)  prior: [30, 39]
     N2 = 77 (K2=68)  prior: [68, 77]
 
     Observed attack rate K_k/N_k (sample-by-sample, median [95% CI]):
       K0/N0 = 0.909  [0.909, 0.938]
-      K1/N1 = 0.882  [0.789, 0.968]
+      K1/N1 = 0.882  [0.769, 1.0]
       K2/N2 = 0.883  [0.883, 0.907]
 
     Comparison with Neal and Roberts M_θ structure:
-      β_C1/β_C2 ratio = 4.72  (expect > 1: younger class has higher within-class rate)
-      β_H/β_G ratio   = 0.29  (mean-field β_H diluted over all class-0 × school pairs; expect < 1 vs NR individual-level)
+      β_C1/β_C2 ratio = 5.6  (expect > 1: younger class has higher within-class rate)
+      β_H/β_G ratio   = 0.19  (mean-field β_H diluted over all class-0 × school pairs; expect < 1 vs NR individual-level)
 
 GLCT 95% credible intervals:
 
-      beta_C1   : (0.0506, 0.1956)
-      beta_C2   : (0.0021, 0.0856)
-      beta_H    : (0.0023, 0.0543)
-      beta_G    : (0.0413, 0.074)
-      mean_δ    : (7.9386, 8.8144)
-      nb_p       (derived): (0.4537, 0.5039)
+      beta_C1   : (0.0412, 0.1831)
+      beta_C2   : (0.001, 0.0746)
+      beta_H    : (0.0006, 0.0479)
+      beta_G    : (0.0451, 0.0759)
+      mean_δ    : (7.9451, 8.8152)
+      nb_p       (derived): (0.4538, 0.5035)
       nb_r      : (4, 4)
       N0        : (96, 99)
-      N1        : (31, 38)
+      N1        : (30, 39)
       N2        : (75, 77)
 
 Boxcar posterior medians:
 
-    β_C1  = 0.1235
-    β_C2  = 0.0255
-    β_H   = 0.018
-    β_G   = 0.0614
-    nb_r  = 4,  nb_p = 0.479,  mean δ = 8.35 d
+    β_C1  = 0.1183
+    β_C2  = 0.0221
+    β_H   = 0.0131
+    β_G   = 0.0636
+    nb_r  = 4,  nb_p = 0.479,  mean δ = 8.36 d
     N0 = 99  (K0=90)
     N1 = 34  (K1=30)
     N2 = 77  (K2=68)
 
     Observed attack rate K_k/N_k (sample-by-sample, median [95% CI]):
       K0/N0 = 0.909  [0.909, 0.938]
-      K1/N1 = 0.882  [0.769, 0.968]
-      K2/N2 = 0.883  [0.883, 0.919]
+      K1/N1 = 0.882  [0.789, 1.0]
+      K2/N2 = 0.883  [0.883, 0.907]
 
 The table below displays the posterior medians for all parameters, and
 both GLCT and Boxcar maps should recover essentially the same parameter
@@ -866,20 +829,22 @@ values.
 
     Parameter     GLCT          Boxcar
     ------------------------------------------
-    β_C1          0.1282        0.1235
-    β_C2          0.0271        0.0255
-    β_H           0.0178        0.018
-    β_G           0.0607        0.0614
-    mean δ        8.3572        8.3471
-    nb_p          0.4786        0.4792
+    β_C1          0.1174        0.1183
+    β_C2          0.021         0.0221
+    β_H           0.0124        0.0131
+    β_G           0.0638        0.0636
+    mean δ        8.3537        8.3569
+    nb_p          0.4788        0.4786
     N0            99.0          99.0
     N1            34.0          34.0
     N2            77.0          77.0
 
+    Saved -> ../figures/fig_hagelloch_mtheta_posteriors.pdf
+
 <div id="fig-posteriors">
 
 <img
-src="dsa_hagelloch_GLCTvsBoxcar_files/figure-commonmark/fig-posteriors-output-1.svg"
+src="dsa_hagelloch_GLCTvsBoxcar_files/figure-commonmark/fig-posteriors-output-2.svg"
 id="fig-posteriors" />
 
 Figure 1
@@ -903,8 +868,8 @@ $(N_i/N_j) \times \beta_{ij} \times \mathrm{mean\_ip}$, with the
 $N_i/N_j$ factor arising because the model state variables are per-group
 fractions (one infected in group $j$ corresponds to fraction $1/N_j$).
 
-      GLCT:   median = 2.18  95% CI = (2.024, 2.389)
-      Boxcar: median = 2.171  95% CI = (2.021, 2.377)
+      GLCT:   median = 2.167  95% CI = (2.017, 2.365)
+      Boxcar: median = 2.169  95% CI = (2.018, 2.365)
 
 ## Posterior predictive checks
 
@@ -944,10 +909,19 @@ end
     posterior_predictions_mtheta(chain)
 ```
 
+Predicted attack rates $\tau_k$ from the forward map, against the
+observed attack rates $K_k/N_k$ (both per posterior draw):
+
+    Class 0  predicted τ = 0.772 [0.704, 0.822]   observed K/N = 0.909 [0.909, 0.938]   relative difference = -15.1%
+    Class 1  predicted τ = 0.881 [0.823, 0.917]   observed K/N = 0.882 [0.769, 1.0]   relative difference = -0.1%
+    Class 2  predicted τ = 0.753 [0.682, 0.8]   observed K/N = 0.883 [0.883, 0.907]   relative difference = -14.8%
+
+    Saved -> ../figures/fig_hagelloch_mtheta_ppc.pdf
+
 <div id="fig-ppc">
 
 <img
-src="dsa_hagelloch_GLCTvsBoxcar_files/figure-commonmark/fig-ppc-output-1.svg"
+src="dsa_hagelloch_GLCTvsBoxcar_files/figure-commonmark/fig-ppc-output-2.svg"
 id="fig-ppc" />
 
 Figure 2
@@ -995,7 +969,7 @@ Figure 3
 
 ## Recovery interval fit
 
-    Empirical mean δ = 7.95 d,  DPH posterior mean δ = 8.36 d
+    Empirical mean δ = 7.95 d,  DPH posterior mean δ = 8.35 d
 
 <div id="fig-recovery-ppc">
 
@@ -1023,14 +997,20 @@ In our DDSA model, all three susceptible population sizes are inferred
 jointly via Binomial final-size constraints, with priors derived from
 the number of children under 14: $N_{\mathrm{total}} = 197$ (Neal &
 Roberts, 2004). This yields $N_0 \in [90,99]$, $N_1 \in [30,39]$,
-$N_2 \in [68,77]$, ranges that are consistent with Neal & Roberts’
-n=m=188 assumption (nearly 100% attack rate) while allowing the data to
-determine where within those bounds the posterior concentrates.
+$N_2 \in [68,77]$. Neal & Roberts instead set $n = m = 188$, assuming
+that every susceptible child was infected. In our fit the class sizes
+concentrate at their upper bounds, which reflects the smaller final size
+of the mean-field model.
 
 We note that the $\beta$ parameter values are not directly comparable in
 scale: Neal & Roberts use individual-to-individual per-day rates; our
 mean-field formulation uses $\beta \times I \times S$. Thus, we present
-a qualitative comparison of the parameter structure.
+a qualitative comparison of the parameter structure. Neal & Roberts
+report posterior densities for their full spatial model rather than
+numerical estimates: like them, we find a strong classroom 1 effect, and
+weak household and classroom 2 effects (the intervals for $\beta_H$ and
+$\beta_{C2}$ extend almost to zero), as their noticeable support for
+models without these terms suggests.
 
 Neal & Roberts’ full model included a spatial distance-decay term; in
 the non-spatial comparison considered here, this corresponds to setting
@@ -1054,9 +1034,9 @@ absorbed by $\beta_G$.
 
     Qualitative checks:
       1. β_C1 > β_C2:  true  (NR: evidence for different classroom rates)
-      2. β_H > 0:      true  (NR: strong household effect)
+      2. β_H > 0:      true  (NR: household effect weakly identified)
       3. β_G > 0:      true  (NR: global mixing component)
-      4. P(β_C1>β_C2) = 0.994
+      4. P(β_C1>β_C2) = 0.996
 
 The posterior attack rate for Class 1 ($\hat{\tau}_1 \approx K_1/N_1$)
 is consistent with DDSA recovering both the transmission dynamics and
@@ -1079,9 +1059,9 @@ transmission. A hard upper bound on $r$ can make residual marginal
 misfit interpretable as a model-class limit rather than as precise
 identification of $r$, but the fit is still consistent with the data.
 
-    Class 0:  K=90,  N=99 [96, 99]  K/N (median [95% CI]) = 0.909 [0.909, 0.938]  model-implied τ = 0.772 [0.716, 0.83]
-    Class 1:  K=30,  N=34 [31, 38]  K/N (median [95% CI]) = 0.882 [0.789, 0.968]  model-implied τ = 0.884 [0.822, 0.919]
-    Class 2:  K=68,  N=77 [75, 77]  K/N (median [95% CI]) = 0.883 [0.883, 0.907]  model-implied τ = 0.744 [0.668, 0.803]
+    Class 0:  K=90,  N=99 [96, 99]  K/N (median [95% CI]) = 0.909 [0.909, 0.938]  model-implied τ = 0.772 [0.704, 0.822]
+    Class 1:  K=30,  N=34 [30, 39]  K/N (median [95% CI]) = 0.882 [0.769, 1.0]  model-implied τ = 0.881 [0.823, 0.917]
+    Class 2:  K=68,  N=77 [75, 77]  K/N (median [95% CI]) = 0.883 [0.883, 0.907]  model-implied τ = 0.753 [0.682, 0.8]
 
 In the observed data, Class 1 infection times cluster around days 21–28
 while Class 2’s main wave spans days 26–40, so
@@ -1090,28 +1070,29 @@ while Class 2’s main wave spans days 26–40, so
 the household-driven pre-school epidemic is correctly identified as a
 downstream consequence of the school outbreak.
 
-    Mean peak days:  Class 0=28.9,  Class 1=26.9,  Class 2=29.3
-    P(Class 1 peaks after Class 2) = 0.02
+    Mean peak days:  Class 0=29.0,  Class 1=27.1,  Class 2=29.2
+    P(Class 1 peaks after Class 2) = 0.03
       → expected near 0: Class 1 should peak before Class 2's main wave
     P(Class 0 peaks after Class 1) = 1.0
       → expected near 1: pre-school wave is driven by household transmission from school children
 
 In sum, both GLCT and Boxcar implementations produce consistent
 posteriors across all parameters, confirming that the two formulations
-are equivalent. Convergence is clean for $\beta_{C1}$
-($\hat{R} \approx 1.01$–$1.03$ across the two implementations) but
-remains only marginal for $\beta_{C2}$, $\beta_H$, and $\beta_G$
-($\hat{R} \approx 1.05$–$1.09$), reflecting the limited identifiability
-of the household and global terms under mean-field contact structure.
-Despite this, the model captures the primary qualitative dynamics by
-recovering a higher transmission rate in the younger school class
+are equivalent. With the integer parameters summed out of the
+likelihood, convergence is clean for all parameters in both
+implementations ($\hat{R} \le 1.003$, bulk ESS $\ge 1{,}490$ from 8,000
+draws). The household and global terms $\beta_H$ and $\beta_G$ remain
+only weakly separated (wide credible intervals for $\beta_H$ and
+$\beta_{C2}$), reflecting their limited identifiability under mean-field
+contact structure. The model captures the primary qualitative dynamics
+by recovering a higher transmission rate in the younger school class
 compared to the older class with posterior probability
-$P(\beta_{C1}>\beta_{C2}) = 0.994$. It also identifies a positive
+$P(\beta_{C1}>\beta_{C2}) = 0.996$ (GLCT). It also identifies a positive
 household transmission route ($\beta_H > 0$), which characterises the
 pre-school epidemic as a secondary wave following the school outbreak,
 and gives consistent reproduction-number estimates between
-implementations (GLCT $R_0 = 2.18$, 95% CI $[2.02,\,2.39]$ vs. Boxcar
-$R_0 = 2.17$, 95% CI $[2.02,\,2.38]$, both posterior medians). Although
+implementations (GLCT $R_0 = 2.17$, 95% CI $[2.01,\,2.37]$ vs. Boxcar
+$R_0 = 2.17$, 95% CI $[2.02,\,2.37]$, both posterior medians). Although
 the model underpredicts attack rates for certain classes due to
 aggregating heterogeneous contact structure into mean-field terms, these
 results do not alter the directional findings.
