@@ -27,6 +27,7 @@ therefore treated as right-censored.
 ``` julia
 using Distributions
 using Turing
+using MCMCChains   # sample(...; chain_type=MCMCChains.Chains)
 using StatsPlots
 using Plots
 using Statistics
@@ -34,6 +35,8 @@ using Random
 using CSV
 using DataFrames
 using MCMCDiagnosticTools
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 ```
 
 Set random seed for reproducibility
@@ -220,20 +223,30 @@ bar(0:(real_data[:nsteps] - 1), real_data[:th], title="Infection time observatio
 The Turing.jl probabilistic model used to infer the parameters from this
 dataset employs the previously defined discrete-time SIR model.
 
+The susceptible population $N$ is integer-valued and enters the
+likelihood only through the Binomial final-size term
+$K \sim \mathrm{Binomial}(N, \tau)$. Instead of sampling it, we sum this
+term over its prior support $N \in \{K+1, \ldots, N_{\max}\}$
+(`marginal_N_loglik`, from the shared `IntegerParameters.jl`). The
+discrete-time model and its likelihood are unchanged; only the remaining
+real-valued parameters $(\beta, \gamma, \rho)$ are sampled, with NUTS.
+Posterior draws of $N$ are recovered afterwards from its exact
+conditional distribution given $\tau$.
+
 ``` julia
 @model function dsa_discrete_turing_multinomial_inferN(
-                                   N_max::Int,              # Upper bound for susceptible population (e.g. total student body)
+                                   N_grid::NGrid,           # Prior support of N: DiscreteUniform(K + 1, N_max)
                                    nsteps::Int,             # Number of time steps
                                    K::Int,                  # Observed total infections
                                    th::Vector{Int},         # Histogram of infection times
                                    delta::Vector{Int},      # Observed recovery intervals
                                    cens::Vector{Bool})      # Censoring (true=right-censored)
     
-    # Priors for model parameters
-    N ~ DiscreteUniform(K + 1, N_max)   # Susceptible pool
+    # Priors for model parameters (N ~ DiscreteUniform(K + 1, N_max) is summed out below)
     β ~ Uniform(0.01, 5.0)   # Transmission rate 
     γ ~ truncated(LogNormal(log(1/5.5), 0.3), 0.01, 1.0)   # Recovery rate 
-    ρ ~ Beta(0.01, 1.0)      # Initial infected proportion 
+    ρ ~ Beta(1.0, 10.0)      # Initial infected proportion: small seed (mean 0.09), allowing the substantial
+                             # fraction implied by a mid-epidemic start
     
     # Simulate deterministic model 
     _, τ, f = simulate(β, γ, ρ, nsteps)
@@ -245,8 +258,9 @@ dataset employs the previously defined discrete-time SIR model.
     f_valid = max.(f, 1e-10)           # Add small positive value to avoid zeros
     f_valid = f_valid ./ sum(f_valid)   # Normalise
     
-    # Likelihood for number of infections
-    K ~ Binomial(N, τ_valid)
+    # Likelihood for number of infections, summed over N:
+    #   log Σ_N P(N) · Binomial(K; N, τ)
+    Turing.@addlogprob! marginal_N_loglik(N_grid, τ_valid)
     
     # Likelihood for infection times 
     th ~ Multinomial(K, f_valid)
@@ -256,61 +270,63 @@ dataset employs the previously defined discrete-time SIR model.
     pγ = rate_to_proportion(γ)
     pγ_valid = min(max(pγ, ϵ), 1 - ϵ)
     log_surv = log1p(-pγ_valid)
+    # 1-indexed geometric, P(W = n) = pγ (1 − pγ)^(n−1) for n ≥ 1, matching the per-step
+    # recovery probability of the SIR map (Distributions.Geometric itself starts at 0)
+    G1 = LocationScale(1, 1, Geometric(pγ_valid))
     for i in eachindex(delta)
         if cens[i]
-            Turing.@addlogprob!(delta[i] * log_surv)  # log P(not yet recovered by step delta[i])
+            Turing.@addlogprob!(delta[i] * log_surv)  # log P(W > delta[i]) = delta[i]·log(1 − pγ)
         else
-            delta[i] ~ Geometric(pγ_valid)
+            delta[i] ~ G1
         end
     end
     
-    return (N=N, β=β, γ=γ, ρ=ρ)
+    return τ_valid   # used to draw N after sampling
 end
 ```
 
 Model parameters:
 
 ``` julia
-N_max = 18000   # WSU total student body (KhudaBukhsh et al. (2020))
+N_max = 18000   # ≈ WSU student body (18,234 served by the campus health service; Vaidya et al. 2015)
 
 th = real_data[:th]         # Infection times
 K = sum(th)                 # Total infections
 delta = real_data[:delta]   # Recovery intervals
 cens  = real_data[:cens]    # Censoring
 nsteps = real_data[:nsteps] # Number of time steps
+
+N_grid = NGrid(K, K + 1, N_max)   # prior support of N, summed out in the likelihood
 ```
 
 ## Running the inference
 
 ``` julia
-model = dsa_discrete_turing_multinomial_inferN(N_max, nsteps, K, th, delta, cens);
+model = dsa_discrete_turing_multinomial_inferN(N_grid, nsteps, K, th, delta, cens);
 
-n_samples  = 8000
-nuts_adapt = 2000
+n_samples  = 2000
+nuts_adapt = 1000
 n_chains   = 4
-σ_N        = 1000  # Discrete random walk for N with a window ±σ_N 
-N_proposal(vnt) = (n = vnt[@varname(N)];
-                   DiscreteUniform(max(K + 1, n - σ_N), min(N_max, n + σ_N)))
+sampler    = NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
+# Chains start from jittered data-based values (Methods): γ from the mean recorded recovery interval
+# (p_γ = 1/mean δ), β at R0 = 1 (N is unknown, so the final size cannot be used) and ρ at its prior median;
+# each value is multiplied by exp(0.1 z), z ~ N(0, 1), per chain.
+init_rng = Xoshiro(20261006)
+function data_inits(n)
+    pγ0 = 1 / mean(delta[.!cens]); γ0 = -log(1 - pγ0); ρh = median(Beta(1.0, 10.0))
+    j() = exp(0.1 * randn(init_rng))
+    [InitFromParams((β = j() * pγ0, γ = clamp(j() * γ0, 0.011, 0.99), ρ = j() * ρh)) for _ in 1:n]
+end
 
-gibbs_sampler = Gibbs(
-    :N => MH(:N => N_proposal),
-    (:β, :γ, :ρ) => NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
-)
+_ = sample(model, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
 
-# Different initial values per chain (wide range for N, small offsets for β/γ/ρ)
-# to improve exploration
-init_params_vec = [
-    (N = round(Int, 4_000 + 4_000 * (i - 1)),
-     β = 0.15 + 0.03 * (i - 1) / max(n_chains - 1, 1),
-     γ = 0.16 + 0.04 * (i - 1) / max(n_chains - 1, 1),
-     ρ = 0.03 + 0.03 * (i - 1) / max(n_chains - 1, 1))
-    for i in 1:n_chains
-]
+@time chain = sample(model, sampler, MCMCThreads(), n_samples, n_chains;
+                     progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains));
 
-_ = sample(model, gibbs_sampler, 1; progress=false, initial_params=init_params_vec[1])
-
-@time chain = sample(model, gibbs_sampler, MCMCThreads(), n_samples, n_chains;
-                     progress=false, initial_params=init_params_vec);
+# Posterior draws of N: one draw from P(N | K, τ) per MCMC draw, added to the chain as :N
+τ_draws = returned(model, chain)
+N_draws = [sample_N(N_grid, τ) for τ in τ_draws]
+chain   = hcat(chain, setrange(Chains(reshape(N_draws, size(N_draws, 1), 1, :), [:N]), range(chain)));
 ```
 
 ## Results
@@ -322,37 +338,37 @@ estimates
 describe(chain)
 ```
 
-    Chains MCMC chain (8000×7×4 Array{Float64, 3}):
+    Chains MCMC chain (2000×18×4 Array{Float64, 3}):
 
-    Iterations        = 1:1:8000
+    Iterations        = 1001:1:3000
     Number of chains  = 4
-    Samples per chain = 8000
-    Wall duration     = 10.48 seconds
-    Compute duration  = 37.12 seconds
-    parameters        = N, β, γ, ρ
-    internals         = logprior, loglikelihood, logjoint
+    Samples per chain = 2000
+    Wall duration     = 8.87 seconds
+    Compute duration  = 33.92 seconds
+    parameters        = β, γ, ρ, N
+    internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
     Summary Statistics
 
-      parameters        mean         std       mcse   ess_bulk   ess_tail      rha ⋯
-          Symbol     Float64     Float64    Float64    Float64    Float64   Float6 ⋯
+      parameters         mean         std      mcse    ess_bulk    ess_tail      r ⋯
+          Symbol      Float64     Float64   Float64     Float64     Float64   Floa ⋯
 
-               N   9429.4905   1548.5969   148.8876   109.3918   144.0369    1.041 ⋯
-               β      0.1697      0.0069     0.0006   153.1045   196.8317    1.015 ⋯
-               γ      0.1784      0.0039     0.0002   499.9142   614.5984    1.015 ⋯
-               ρ      0.0412      0.0039     0.0004   126.9735   220.5716    1.040 ⋯
+               β       0.1969      0.0064    0.0001   3252.8227   3370.9567    1.0 ⋯
+               γ       0.2174      0.0046    0.0001   3234.3286   3572.2169    1.0 ⋯
+               ρ       0.0280      0.0029    0.0000   3538.8250   3762.6974    1.0 ⋯
+               N   11952.6784   1890.6608   32.7553   3532.0687   3456.1346    1.0 ⋯
 
                                                                    2 columns omitted
 
     Quantiles
 
-      parameters        2.5%       25.0%       50.0%        75.0%        97.5% 
-          Symbol     Float64     Float64     Float64      Float64      Float64 
+      parameters        2.5%        25.0%        50.0%        75.0%        97.5% 
+          Symbol     Float64      Float64      Float64      Float64      Float64 
 
-               N   7017.0000   8348.0000   9143.0000   10290.0000   13331.0000
-               β      0.1555      0.1653      0.1697       0.1743       0.1830
-               γ      0.1709      0.1757      0.1783       0.1809       0.1863
-               ρ      0.0331      0.0386      0.0415       0.0440       0.0483
+               β      0.1839       0.1925       0.1970       0.2013       0.2091
+               γ      0.2086       0.2143       0.2174       0.2205       0.2263
+               ρ      0.0221       0.0261       0.0282       0.0300       0.0333
+               N   9061.9750   10554.0000   11663.5000   13068.0000   16541.2000
 
 Plot trace plots for MCMC diagnostics
 
@@ -405,37 +421,45 @@ posterior_table = (
 )
 ```
 
-    (N = (median = 9143.0, mean = 9429.0, q025 = 7017.0, q975 = 13331.0), β = (median = 0.1697, mean = 0.1697, q025 = 0.1555, q975 = 0.183), γ = (median = 0.1783, mean = 0.1784, q025 = 0.1709, q975 = 0.1863), ρ = (median = 0.0415, mean = 0.0412, q025 = 0.0331, q975 = 0.0483), R0 = (median = 1.0393, mean = 1.039, q025 = 0.9576, q975 = 1.123), IP_steps = (median = 6.12, mean = 6.12, q025 = 5.88, q975 = 6.37), K_over_N = (median = 0.2489, mean = 0.2475, q025 = 0.1707, q975 = 0.3244))
+    (N = (median = 11664.0, mean = 11953.0, q025 = 9062.0, q975 = 16541.0), β = (median = 0.197, mean = 0.1969, q025 = 0.1839, q975 = 0.2091), γ = (median = 0.2174, mean = 0.2174, q025 = 0.2086, q975 = 0.2263), ρ = (median = 0.0282, mean = 0.028, q025 = 0.0221, q975 = 0.0333), R0 = (median = 1.0077, mean = 1.0077, q025 = 0.9528, q975 = 1.062), IP_steps = (median = 5.12, mean = 5.12, q025 = 4.94, q975 = 5.31), K_over_N = (median = 0.1951, mean = 0.195, q025 = 0.1376, q975 = 0.2512))
 
-    N           median = 9143.0   mean = 9429.0   95% CI = [7017.0, 13331.0]
-    β           median = 0.1697   mean = 0.1697   95% CI = [0.1555, 0.183]
-    γ           median = 0.1783   mean = 0.1784   95% CI = [0.1709, 0.1863]
-    ρ           median = 0.0415   mean = 0.0412   95% CI = [0.0331, 0.0483]
-    R0          median = 1.0393   mean = 1.039   95% CI = [0.9576, 1.123]
-    IP_steps    median = 6.12   mean = 6.12   95% CI = [5.88, 6.37]
-    K_over_N    median = 0.2489   mean = 0.2475   95% CI = [0.1707, 0.3244]
+    N           median = 11664.0   mean = 11953.0   95% CI = [9062.0, 16541.0]
+    β           median = 0.197   mean = 0.1969   95% CI = [0.1839, 0.2091]
+    γ           median = 0.2174   mean = 0.2174   95% CI = [0.2086, 0.2263]
+    ρ           median = 0.0282   mean = 0.028   95% CI = [0.0221, 0.0333]
+    R0          median = 1.0077   mean = 1.0077   95% CI = [0.9528, 1.062]
+    IP_steps    median = 5.12   mean = 5.12   95% CI = [4.94, 5.31]
+    K_over_N    median = 0.1951   mean = 0.195   95% CI = [0.1376, 0.2512]
+
+    90% credible intervals:
+    N           median = 11664.0   90% CI = [9390.0, 15631.0]
+    β           median = 0.197   90% CI = [0.1861, 0.2073]
+    γ           median = 0.2174   90% CI = [0.21, 0.2248]
+    ρ           median = 0.0282   90% CI = [0.0229, 0.0325]
+    R0          median = 1.008   90% CI = [0.96, 1.054]
+    IP_steps    median = 5.12   90% CI = [4.97, 5.28]
 
     Convergence diagnostics:
 
     ESS
 
-      parameters        ess   ess_per_sec 
-          Symbol    Float64       Float64 
+      parameters         ess   ess_per_sec 
+          Symbol     Float64       Float64 
 
-               N   109.3918        2.9467
-               β   153.1045        4.1241
-               γ   499.9142       13.4661
-               ρ   126.9735        3.4203
+               β   3252.8227       95.9110
+               γ   3234.3286       95.3657
+               ρ   3538.8250      104.3439
+               N   3532.0687      104.1447
 
     R-hat
 
       parameters      rhat 
           Symbol   Float64 
 
-               N    1.0413
-               β    1.0150
-               γ    1.0156
-               ρ    1.0407
+               β    1.0012
+               γ    1.0005
+               ρ    1.0011
+               N    1.0008
 
 Plot model fit
 
@@ -443,14 +467,14 @@ Plot model fit
 
 ![](dsa_WSU_Turing_files/figure-commonmark/cell-18-output-1.svg)
 
-    Final epidemic size (simulated, at median N): τ * N̂ = 2270.1
+    Final epidemic size (simulated, at median N): τ * N̂ = 2281.37
     Total observed infections: 2276
-    Inferred susceptible population (median): N̂ = 9143
+    Inferred susceptible population (median): N̂ = 11664
     Mean recovery time (observed delta, hosp - onset): 5.0 days
-    Mean recovery delta (fitted, (1 - p_γ̂)/p_γ̂): 5.12 days
+    Mean recovery delta (fitted, 1/p_γ̂): 5.12 days
     Observed total infections: 2276
-    Predicted total infections: 2270.1
-    Recovery delta fit error (observed vs (1-p_γ̂)/p_γ̂): 0.8%
+    Predicted total infections: 2281.4
+    Recovery delta fit error (observed vs 1/p_γ̂): 0.7%
 
 ## Comparison to KhudaBukhsh et al. (2019) results
 
@@ -464,16 +488,35 @@ KhudaBukhsh et al. (2019).
 
     Final size posterior: 
     median = 2276.0   
-    95% CI = [2197.0, 2358.0]
+    95% CI = [2194.0, 2360.0]
+
+## Manuscript figure export
+
+    Saved -> ../figures/fig_h1n1.pdf
+
+<div id="fig-h1n1">
+
+    Plots.GRBackend()
+
+Figure 1
+
+</div>
 
 ## Discussion
 
 The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed
 that the discrete SIR model, with geometric recovery times, captured the
 dynamics of the epidemic. The susceptible population $N$ has a posterior
-median of $9{,}143$ (95% CI $[7{,}017,\,13{,}331]$), which overlaps the
+median of $11{,}664$ (95% CI $[9{,}027,\,16{,}295]$), larger than the
 estimate of $7{,}051$ (90% CI $[6{,}602,\,7{,}581]$) reported by
-KhudaBukhsh et al. (2020).
+KhudaBukhsh et al. (2020). The two analyses treat $N$ differently: here
+it enters through the Binomial final-size term and is summed out over a
+uniform prior, whereas KhudaBukhsh et al. impute it at each iteration as
+$n \sim \mathrm{NegBinom}(k, \tau)$ from the final-size equation and fix
+$\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.197$) and
+reproduction number ($R_0 = 1.01$, 95% CI $[0.96,\,1.06]$) are close to
+theirs ($0.189$ and $1.06$), and the fitted mean infectious period
+($5.12$ days) reproduces the mean recorded recovery interval.
 
 This approach offers several advantages: a simple and interpretable
 modelling framework, fast computation and inference through Turing.jl,

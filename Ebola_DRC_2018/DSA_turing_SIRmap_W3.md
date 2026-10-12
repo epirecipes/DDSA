@@ -1,5 +1,4 @@
-# Inference of an SIR difference equation model using dynamic survival
-analysis and Turing.jl - Wave 3 of the Ebola outbreak data
+# Inference of an SIR difference equation model using dynamic survival analysis and Turing.jl - Wave 3 of the Ebola outbreak data
 Sandra Montes `(@slmontes)` and Simon Frost `(@sdwfrost)`
 2026-04-13
 
@@ -34,6 +33,8 @@ using Dates               # For now()
 using CSV                 # For reading CSV files
 using DataFrames          # For data manipulation
 using Statistics          # For statistical functions
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 ```
 
 We set a random seed for reproducibility.
@@ -192,6 +193,8 @@ T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
+# Prior support of N, summed out in the likelihood: N ∈ {N_min, …, N_min + 19,999}
+N_grid = NGrid(K_total, N_min, N_min + 19_999)
 ```
 
 Summary of the loaded data:
@@ -219,6 +222,16 @@ we take advantage of the discrete nature of the data, by fitting a
 histogram of the infection times using a multinomial distribution,
 rather than a series of categorical distributions.
 
+The wave-specific at-risk population $N$ is integer-valued and enters
+the likelihood only through the Binomial final-size term. Instead of
+sampling it, we sum that term over its prior support,
+$N \in \{N_{\min}, \ldots, N_{\min} + 19{,}999\}$ with $N_{\min} = K$
+(`marginal_N_loglik`, from the shared `IntegerParameters.jl`). The
+discrete-time model and its likelihood are unchanged; only the
+real-valued parameters $(\beta, \gamma, \rho)$ are sampled, with NUTS,
+and posterior draws of $N$ are recovered afterwards from its exact
+conditional distribution given $\tau$.
+
 ``` julia
 @model function dsa_ebola_allrecords(nsteps::Int,
                                      K_total::Int,
@@ -226,17 +239,13 @@ rather than a series of categorical distributions.
                                      th_onset::Vector{Int},
                                      delta_complete::Vector{Int},
                                      T_hosp_only::Vector{Int},
-                                     N_min::Int)
+                                     N_grid::NGrid)   # prior support of N
 
     # Priors for model parameters
     β ~ Uniform(0.01, 1.0)   # Transmission rate 
     γ ~ Uniform(0.01, 1.0)   # Recovery rate 
     ρ ~ Beta(1.0, 500.0)      # Initial infected proportion 
-
-    N_float ~ Uniform(Float64(N_min), Float64(N_min + 20000))
-    # Convert to integer for Binomial: use floor and clamp to ensure N >= N_min
-    # The conversion is done after sampling, so NUTS can sample continuously
-    N = Int(floor(max(Float64(N_min), N_float)))
+    # N ~ DiscreteUniform(N_min, N_min + 19_999) is summed out in term (1) below
     
     # Simulate deterministic model 
     _, τ, f = simulate(β, γ, ρ, nsteps)
@@ -249,8 +258,9 @@ rather than a series of categorical distributions.
     f_valid = f_valid / sum(f_valid)   # Normalise
     log_f_valid = log.(f_valid)
     
-    # (1) Binomial final-size: all K_total infections
-    K_total ~ Binomial(N, τ_valid)
+    # (1) Binomial final-size: all K_total infections, summed over N:
+    #     log Σ_N P(N) · Binomial(K_total; N, τ)
+    Turing.@addlogprob! marginal_N_loglik(N_grid, τ_valid)
 
     # (2) Multinomial onset histogram: records with known onset (K_onset)
     th_onset ~ Multinomial(K_onset, f_valid)
@@ -274,7 +284,7 @@ rather than a series of categorical distributions.
         Turing.@addlogprob! foldl(logaddexp, log_terms; init = -Inf)
     end
 
-    return (β=β, γ=γ, ρ=ρ, N=N_float)
+    return τ_valid   # used to draw N after sampling
 end;
 ```
 
@@ -284,22 +294,38 @@ We now perform inference using the Turing model. We start by setting the
 number of samples to be used in the sampler and instantiating the model.
 
 ``` julia
-n_samples = 5000
+n_samples  = 2000
+nuts_adapt = 1000
+n_chains   = 4
 model = dsa_ebola_allrecords(nsteps, K_total, K_onset,
-                              th_onset, delta_complete, T_hosp_only, N_min);
+                              th_onset, delta_complete, T_hosp_only, N_grid);
 ```
 
 Next, we run inference using the No U-Turn Sampler (NUTS).
 
 ``` julia
+sampler = NUTS(nuts_adapt, 0.8; max_depth=12, Δ_max=1000.0)
+# Turing's default start (uniform(-2, 2) on the unconstrained scale) can lie far outside the prior's
+# mass, e.g. ρ ≈ 0.5 under Beta(1, 500), so it is not used.
+# Chains start from jittered data-based values (Methods): γ from the mean recorded onset-to-hospitalisation
+# interval (p_γ = 1/mean δ), β at R0 = 1 (N is unknown, so the final size cannot be used) and ρ at its prior
+# median; each value is multiplied by exp(0.1 z), z ~ N(0, 1), per chain.
+init_rng = Xoshiro(20261006)
+function data_inits(n)
+    pγ0 = 1 / mean(delta_complete); γ0 = -log(1 - pγ0); ρh = median(Beta(1.0, 500.0))
+    j() = exp(0.1 * randn(init_rng))
+    [InitFromParams((β = clamp(j() * pγ0, 0.011, 0.99), γ = clamp(j() * γ0, 0.011, 0.99), ρ = j() * ρh)) for _ in 1:n]
+end
 # Warmup
-_ = sample(model, NUTS(), 1)
+_ = sample(model, sampler, 1; progress=false, chain_type=MCMCChains.Chains)
 # Run sampler on 4 chains
-@time chain = sample(model,
-                     NUTS(500, 0.65; max_depth=12, Δ_max=1000.0, init_ϵ=0.2),
-                     MCMCThreads(),
-                     n_samples,
-                     4);
+@time chain = sample(model, sampler, MCMCThreads(), n_samples, n_chains;
+                     progress=false, chain_type=MCMCChains.Chains, initial_params=data_inits(n_chains));
+
+# Posterior draws of N: one draw from P(N | K, τ) per MCMC draw, added to the chain as :N
+τ_draws = returned(model, chain)
+N_draws = [sample_N(N_grid, τ) for τ in τ_draws]
+chain   = hcat(chain, setrange(Chains(reshape(N_draws, size(N_draws, 1), 1, :), [:N]), range(chain)));
 ```
 
 We can pass different samplers from `Turing.jl` (e.g. `MH`, `SGLD`,
@@ -317,25 +343,25 @@ estimates, along with the expected number of samples.
 describe(chain)
 ```
 
-    Chains MCMC chain (5000×18×4 Array{Float64, 3}):
+    Chains MCMC chain (2000×18×4 Array{Float64, 3}):
 
-    Iterations        = 501:1:5500
+    Iterations        = 1001:1:3000
     Number of chains  = 4
-    Samples per chain = 5000
-    Wall duration     = 795.27 seconds
-    Compute duration  = 2531.18 seconds
-    parameters        = β, γ, ρ, N_float
-    internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, lp, logprior, loglikelihood
+    Samples per chain = 2000
+    Wall duration     = 7.21 seconds
+    Compute duration  = 28.11 seconds
+    parameters        = β, γ, ρ, N
+    internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
     Summary Statistics
 
       parameters        mean        std      mcse    ess_bulk    ess_tail      rha ⋯
           Symbol     Float64    Float64   Float64     Float64     Float64   Float6 ⋯
 
-               β      0.2395     0.0079    0.0002   2705.8411   4158.3743    1.001 ⋯
-               γ      0.2420     0.0087    0.0002   2555.0536   4296.3077    1.000 ⋯
-               ρ      0.0068     0.0006    0.0000   2932.7657   4941.3867    1.000 ⋯
-         N_float   5260.1903   684.7645   11.5295   3892.4985   4204.0838    1.000 ⋯
+               β      0.2396     0.0076    0.0001   2834.8300   3825.5270    1.001 ⋯
+               γ      0.2423     0.0086    0.0002   2535.8951   3424.8922    1.000 ⋯
+               ρ      0.0068     0.0006    0.0000   2718.6402   3672.9384    1.000 ⋯
+               N   5268.4669   698.0992   10.2623   5486.0145   4348.2569    1.000 ⋯
 
                                                                    2 columns omitted
 
@@ -344,17 +370,17 @@ describe(chain)
       parameters        2.5%       25.0%       50.0%       75.0%       97.5% 
           Symbol     Float64     Float64     Float64     Float64     Float64 
 
-               β      0.2243      0.2341      0.2394      0.2447      0.2550
-               γ      0.2253      0.2361      0.2418      0.2478      0.2592
-               ρ      0.0057      0.0064      0.0068      0.0071      0.0079
-         N_float   4179.5339   4775.3131   5176.8534   5646.7463   6833.2286
+               β      0.2247      0.2344      0.2397      0.2448      0.2546
+               γ      0.2257      0.2364      0.2422      0.2480      0.2592
+               ρ      0.0057      0.0064      0.0067      0.0071      0.0079
+               N   4194.9750   4774.0000   5165.0000   5650.2500   6922.1000
 
 NUTS diagnostics:
 
-    NUTS internals available: [:n_steps, :is_accept, :acceptance_rate, :log_density, :hamiltonian_energy, :hamiltonian_energy_error, :max_hamiltonian_energy_error, :tree_depth, :numerical_error, :step_size, :nom_step_size, :lp, :logprior, :loglikelihood]
-    Divergent transitions: 0 / 20000
-    Max tree depth reached: 12.0
-    Step size ε (median [min, max]): 0.00117 [0.00102, 0.00717]
+    NUTS internals available: [:n_steps, :is_accept, :acceptance_rate, :log_density, :hamiltonian_energy, :hamiltonian_energy_error, :max_hamiltonian_energy_error, :tree_depth, :numerical_error, :step_size, :nom_step_size, :logprior, :loglikelihood, :logjoint]
+    Divergent transitions: 1 / 8000
+    Max tree depth reached: 6.0
+    Step size ε (median [min, max]): 0.288 [0.28, 0.725]
 
 We can also plot posterior distributions for each parameter.
 
@@ -362,7 +388,7 @@ We can also plot posterior distributions for each parameter.
 β_med = median(chain[:β])
 γ_med = median(chain[:γ])
 ρ_med = median(chain[:ρ])
-N_med = median(chain[:N_float])
+N_med = median(chain[:N])
 
 # Vossler et al. (2022) Wave 1 reference values
 p1 = histogram(chain[:β], label="", title="β", density=true)
@@ -378,7 +404,7 @@ vline!(p3, [0.0067], label="Ref (Vossler et al.)", color=:black, linestyle=:dash
 vline!(p3, [ρ_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)
 
 # N is wave-specific
-p4 = histogram(chain[:N_float], label="", title="N (Wave 3)", density=true, bins=50)
+p4 = histogram(chain[:N], label="", title="N (Wave 3)", density=true, bins=50)
 vline!(p4, [N_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)
 
 plot(p1, p2, p3, p4, layout=(2,2), plot_title="Posterior Distributions — Wave 3")
@@ -402,7 +428,7 @@ We summarise the posterior estimates for the model parameters.
 β_chain  = vec(chain[:β])
 γ_chain  = vec(chain[:γ])
 ρ_chain  = vec(chain[:ρ])
-N_chain  = vec(chain[:N_float])
+N_chain  = vec(chain[:N])
 pγ_chain = rate_to_proportion.(γ_chain)
 
 R0_chain       = β_chain ./ pγ_chain           # R0 of the discrete process
@@ -436,16 +462,16 @@ posterior_table = (
 )
 ```
 
-    (N = (median = 5177.0, mean = 5260.0, q025 = 4180.0, q975 = 6833.0), β = (median = 0.2394, mean = 0.2395, q025 = 0.2243, q975 = 0.255), γ = (median = 0.2418, mean = 0.242, q025 = 0.2253, q975 = 0.2592), ρ = (median = 0.00676, mean = 0.00677, q025 = 0.0057, q975 = 0.00794), R0 = (median = 1.114, mean = 1.114, q025 = 1.077, q975 = 1.152), IP_steps = (median = 4.66, mean = 4.66, q025 = 4.38, q975 = 4.96), I0 = (median = 35.23, mean = 35.41, q025 = 28.35, q975 = 43.62), K_over_N = (median = 0.2065, mean = 0.2065, q025 = 0.1564, q975 = 0.2558))
+    (N = (median = 5165.0, mean = 5268.0, q025 = 4195.0, q975 = 6922.0), β = (median = 0.2397, mean = 0.2396, q025 = 0.2247, q975 = 0.2546), γ = (median = 0.2422, mean = 0.2423, q025 = 0.2257, q975 = 0.2592), ρ = (median = 0.00675, mean = 0.00676, q025 = 0.00565, q975 = 0.00791), R0 = (median = 1.115, mean = 1.114, q025 = 1.075, q975 = 1.151), IP_steps = (median = 4.65, mean = 4.65, q025 = 4.38, q975 = 4.95), I0 = (median = 35.11, mean = 35.39, q025 = 28.46, q975 = 43.58), K_over_N = (median = 0.207, mean = 0.2062, q025 = 0.1544, q975 = 0.2548))
 
-    N           median = 5177.0   mean = 5260.0   95% CI = [4180.0, 6833.0]
-    β           median = 0.2394   mean = 0.2395   95% CI = [0.2243, 0.255]
-    γ           median = 0.2418   mean = 0.242   95% CI = [0.2253, 0.2592]
-    ρ           median = 0.00676   mean = 0.00677   95% CI = [0.0057, 0.00794]
-    R0          median = 1.114   mean = 1.114   95% CI = [1.077, 1.152]
-    IP_steps    median = 4.66   mean = 4.66   95% CI = [4.38, 4.96]
-    I0          median = 35.23   mean = 35.41   95% CI = [28.35, 43.62]
-    K_over_N    median = 0.2065   mean = 0.2065   95% CI = [0.1564, 0.2558]
+    N           median = 5165.0   mean = 5268.0   95% CI = [4195.0, 6922.0]
+    β           median = 0.2397   mean = 0.2396   95% CI = [0.2247, 0.2546]
+    γ           median = 0.2422   mean = 0.2423   95% CI = [0.2257, 0.2592]
+    ρ           median = 0.00675   mean = 0.00676   95% CI = [0.00565, 0.00791]
+    R0          median = 1.115   mean = 1.114   95% CI = [1.075, 1.151]
+    IP_steps    median = 4.65   mean = 4.65   95% CI = [4.38, 4.95]
+    I0          median = 35.11   mean = 35.39   95% CI = [28.46, 43.58]
+    K_over_N    median = 0.207   mean = 0.2062   95% CI = [0.1544, 0.2548]
 
     Vossler et al. (2022) Wave 3 reference (continuous-time, β/γ):
       β = 0.235, γ = 0.214, ρ = 0.0067, β/γ = 1.098, 1/γ = 4.7 d
@@ -503,6 +529,22 @@ plot(p1, size=(800, 500))
 ```
 
 ![](DSA_turing_SIRmap_W3_files/figure-commonmark/cell-22-output-1.svg)
+
+## Save epidemic curve data
+
+## Manuscript figure export
+
+    Saved -> ../figures/fig_drc_waves.pdf
+
+<div id="fig-drc-waves">
+
+<img
+src="DSA_turing_SIRmap_W3_files/figure-commonmark/fig-drc-waves-output-2.svg"
+id="fig-drc-waves" />
+
+Figure 1
+
+</div>
 
 ## Discussion
 

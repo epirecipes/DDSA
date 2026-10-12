@@ -56,8 +56,11 @@ dropped when those records are unavailable.
 
 ``` julia
 using Turing, Distributions, Random, Statistics, LinearAlgebra, DataFrames
+using MCMCChains   # sample(...; chain_type=MCMCChains.Chains)
 using OrdinaryDiffEq, Plots, StatsPlots
-include("./PhaseTypeDistributions.jl")
+include("../PhaseTypeDistributions.jl")
+include("../IntegerParameters.jl")  # shared helpers: sum integer parameters (N, r) out of the likelihood
+using .IntegerParameters
 Random.seed!(1234)
 ```
 
@@ -127,28 +130,35 @@ end
 
 β_prior_hi = 2.5    # shared β-prior upper bound for all 5 models
 
-"""DDSA model: final size (Binomial), onset times (Multinomial), and recovery intervals (NegBin phase-type)."""
+"""DDSA log-likelihood for a given phase count `nb_r`: final size (Binomial), onset times
+(Multinomial), and recovery intervals (NegBin phase-type)."""
+function dph_loglik(nb_r, β, ρ, nb_p, N, M, nsteps, K, th, delta, Δt)
+    any(<(nb_r), delta) && return -Inf   # outside the NegBin support {r, r+1, ...}
+    (0 < nb_p < 1) || return -Inf        # support of p (an extreme NUTS proposal can underflow p to 0)
+    dph     = PhaseTypeDistributions.dph_negative_binomial(nb_r, nb_p)
+    result  = simulate_discrete_glct(dph.S, dph.α, β, ρ, nsteps, Δt)
+    τ_valid = clamp(result.τ, 0.001, 0.999)
+    f_safe  = safe_normalise(result.f, nsteps)
+    ll = logpdf(Binomial(N, τ_valid), K)
+    if K > 0
+        all(x -> isfinite(x) && !isnan(x), f_safe) && abs(sum(f_safe) - 1) < 0.01 || return -Inf
+        ll += logpdf(Multinomial(K, f_safe), th)
+    end
+    return ll + sum(logpdf(dph, delta[i]) for i in 1:(M + K))
+end
+
+"""DDSA model. The phase count nb_r ~ DiscreteUniform(1, nb_r_max) is summed out of the
+likelihood (one forward-map run per value), so NUTS samples only (β, ρ, nb_p)."""
 @model function dph_full(N::Int, M::Int, nsteps::Int, K::Int,
                          th::Vector{Int}, delta::Vector{Int}, nb_r_max::Int, Δt::Float64)
     β    ~ Uniform(1e-4, β_prior_hi)
     ρ    ~ Beta(1.0, N - 1)
     nb_p ~ Beta(1.0, 1.0)
-    nb_r ~ DiscreteUniform(1, nb_r_max)
-    dph     = PhaseTypeDistributions.dph_negative_binomial(nb_r, nb_p)
-    result  = simulate_discrete_glct(dph.S, dph.α, β, ρ, nsteps, Δt)
-    τ_valid = clamp(result.τ, 0.001, 0.999)
-    f_safe  = safe_normalise(result.f, nsteps)
-    K ~ Binomial(N, τ_valid)
-    if K > 0
-        if all(x -> isfinite(x) && !isnan(x), f_safe) && abs(sum(f_safe) - 1) < 0.01
-            th ~ Multinomial(K, f_safe)
-        else
-            Turing.@addlogprob! -Inf
-        end
+    logmarg, lps = marginal_r_loglik(1:nb_r_max) do nb_r
+        dph_loglik(nb_r, β, ρ, nb_p, N, M, nsteps, K, th, delta, Δt)
     end
-    for i in 1:(M + K)
-        delta[i] ~ dph
-    end
+    Turing.@addlogprob! logmarg
+    return lps   # per-r log-likelihoods, used to draw nb_r after sampling
 end
 ```
 
@@ -300,38 +310,52 @@ ll_multi = logpdf(Multinomial(K, f_ode), incidence)   # = DDSA's infection-time 
 ll_total = logpdf(Poisson(sum(μ_ode)), K)             # Poisson on the grand total
 ```
 
-    count-Poisson   Σ logPois(yₜ;μₜ)   = -67.4417
-    Multinomial(y;K,f) [timing term]   = -63.1071
-    Poisson(K; total)  [final size]    = -4.3346
-    timing + final size                = -67.4417
+    count-Poisson   Σ logPois(yₜ;μₜ)   = -67.4404
+    Multinomial(y;K,f) [timing term]   = -63.1055
+    Poisson(K; total)  [final size]    = -4.3349
+    timing + final size                = -67.4404
     identity holds: true
 
 # Fitting all models
 
-All five models are sampled with 2000 warm-up and 2000 posterior draws.
-The three $\gamma$-free count models use NUTS with target acceptance
-0.95 and `max_depth` 12. The $\gamma$-fixed model uses standard NUTS
-(target acceptance 0.8). DDSA uses a Gibbs scheme: Metropolis–Hastings
-for the discrete shape $r$ and NUTS on $(\beta, \rho, p)$.
+All five models are sampled with 4 chains of 2000 warm-up and 2000
+posterior draws. The four count models start each chain from a draw from
+the prior; the DDSA chains start from jittered data-based values. The
+three $\gamma$-free count models use NUTS with target acceptance 0.95
+and `max_depth` 12. The $\gamma$-fixed model uses standard NUTS (target
+acceptance 0.8). For DDSA, the integer phase count $r$ is summed out of
+the likelihood over its prior support $r \in \{1, \ldots, r_{\max}\}$
+(`marginal_r_loglik`, from the shared `IntegerParameters.jl`), and NUTS
+(target acceptance 0.8) samples $(\beta, \rho, p)$. Posterior draws of
+$r$ are recovered afterwards from its exact conditional distribution.
 
 ``` julia
-n_warm, n_post = 2000, 2000
+n_warm, n_post, n_chains = 2000, 2000, 4
+# Start each chain from a draw from the prior. (Turing's default, uniform(-2, 2) on the
+# unconstrained scale, can start far outside the prior's mass, e.g. ρ ≈ 0.5 under Beta(1, 500).)
+prior_inits(model, n) = fill(InitFromPrior(), n)
+# Count models: 4 chains each, like DDSA, so R̂ is computed across chains
+sample_count(model, sampler) = sample(model, sampler, MCMCThreads(), n_post, n_chains; progress=false,
+                                      chain_type=MCMCChains.Chains, initial_params=prior_inits(model, n_chains))
 nuts_count = NUTS(n_warm, 0.95; max_depth=12, Δ_max=1000.0)
-ch_pois = sample(count_exp_pois(incidence, N),        nuts_count, n_post; progress=false)
-ch_exp  = sample(count_exp(incidence, N),             nuts_count, n_post; progress=false)
-ch_erl  = sample(count_erlang(incidence, N),          nuts_count, n_post; progress=false)
-ch_fix  = sample(count_exp_fixed(incidence, N, γ_fix), NUTS(1000, 0.8), n_post; progress=false)
+ch_pois = sample_count(count_exp_pois(incidence, N),         nuts_count)
+ch_exp  = sample_count(count_exp(incidence, N),              nuts_count)
+ch_erl  = sample_count(count_erlang(incidence, N),           nuts_count)
+ch_fix  = sample_count(count_exp_fixed(incidence, N, γ_fix), NUTS(1000, 0.8))
 
-nb_r_max = min(10, minimum(delta))
-gibbs = Gibbs(:nb_r => MH(), (:β, :ρ, :nb_p) => NUTS(n_warm, 0.8; max_depth=10, Δ_max=1000.0))
-r_init = Int(clamp(minimum(delta), 1, nb_r_max))
-p_init = clamp(r_init / max(mean(delta), r_init + 0.5), 0.05, 0.95)
-τ_obs  = K / N
-R0_h   = clamp(-log(1 - min(τ_obs, 0.999)) / max(τ_obs, 1e-6), 0.5, 5.0)
-β_init = clamp(R0_h * p_init / r_init, 1e-4, β_prior_hi)
-init   = (; β = β_init, ρ = 1.0/N, nb_p = p_init, nb_r = r_init)
-ch_ddsa = sample(dph_full(N, 1, nsteps, K, th, delta, nb_r_max, Δt), gibbs, n_post;
-                 initial_params = init, progress=false)
+nb_r_max   = min(10, minimum(delta))
+model_ddsa = dph_full(N, 1, nsteps, K, th, delta, nb_r_max, Δt)
+# DDSA chains start from jittered data-based values (Methods): β from the final-size relation
+# R0 = −log(1 − K/N)/(K/N), p = min δ / mean δ, ρ at its prior median; each × exp(0.1 z), z ~ N(0, 1).
+init_rng = Xoshiro(20261006)
+ddsa_inits = let z = K / N, R0h = -log(1 - z) / z, ip = mean(delta), ρh = median(Beta(1.0, N - 1)), j = () -> exp(0.1 * randn(init_rng))
+    [InitFromParams((β = j() * R0h / ip, ρ = j() * ρh, nb_p = clamp(j() * minimum(delta) / ip, 1e-3, 0.99))) for _ in 1:4]
+end
+ch_ddsa = sample(model_ddsa, NUTS(n_warm, 0.8; max_depth=12, Δ_max=1000.0), MCMCThreads(), n_post, 4;
+                 progress=false, chain_type=MCMCChains.Chains, initial_params=ddsa_inits)
+# Posterior draws of nb_r: one draw from P(r | data, β, ρ, p) per MCMC draw, added to the chain
+r_draws = [sample_index(lps) for lps in returned(model_ddsa, ch_ddsa)]   # support is 1:nb_r_max
+ch_ddsa = hcat(ch_ddsa, setrange(Chains(reshape(r_draws, size(r_draws, 1), 1, :), [:nb_r]), range(ch_ddsa)))
 ```
 
 # Results
@@ -368,23 +392,23 @@ let βpr = rand(Uniform(1e-4, β_prior_hi), 200_000), γpr = rand(Uniform(0.02, 
 end
 ```
 
-    prior R0: 2.45 [0.13, 29.63]
+    prior R0: 2.46 [0.12, 29.91]
 
 
     Convergence
-      ODE-exp Poisson (γ free): max R̂=1.0, min ESS=290, divergences=0
-      ODE-exp NegBin  (γ free): max R̂=1.007, min ESS=463, divergences=0
-      ODE-erlang NB   (γ free): max R̂=1.005, min ESS=454, divergences=0
-      ODE-exp NB   (γ fixed): max R̂=1.0, min ESS=783, divergences=0
-      DDSA                     : max R̂=1.001, min ESS=383, divergences=0
+      ODE-exp Poisson (γ free): max R̂=1.003, min ESS=1133, divergences=0
+      ODE-exp NegBin  (γ free): max R̂=1.003, min ESS=1687, divergences=0
+      ODE-erlang NB   (γ free): max R̂=1.002, min ESS=1537, divergences=0
+      ODE-exp NB   (γ fixed): max R̂=1.001, min ESS=3639, divergences=0
+      DDSA                     : max R̂=1.001, min ESS=3407, divergences=0
 
     Posterior median [95% CrI]
     truth:                    β=0.5,  E[W]=6.33 d,  R0=3.16
-    ODE-exp Poisson (γ free): β=0.483 [0.376, 0.899]  meanIP=16.541 [2.239, 46.231]  R0=7.695 [1.956, 19.486]
-    ODE-exp NegBin  (γ free): β=0.524 [0.378, 1.053]  meanIP=12.114 [1.688, 46.63]  R0=6.062 [1.742, 20.24]
-    ODE-erlang NB   (γ free): β=0.436 [0.327, 0.654]  meanIP=11.123 [2.853, 45.751]  R0=4.732 [1.804, 17.894]
-    ODE-exp NB   (γ fixed):   β=0.686 [0.592, 0.783]  meanIP=4.0 d (fixed)  R0=2.742 [2.369, 3.133]
-    DDSA (line list):         β=0.49 [0.431, 0.559]  meanIP=6.379 [6.028, 6.799]  R0=3.127 [2.746, 3.573]  r=4 [4, 4]
+    ODE-exp Poisson (γ free): β=0.485 [0.37, 0.978]  meanIP=16.057 [1.971, 47.18]  R0=7.517 [1.876, 20.162]
+    ODE-exp NegBin  (γ free): β=0.529 [0.375, 1.044]  meanIP=11.06 [1.738, 46.066]  R0=5.662 [1.756, 19.777]
+    ODE-erlang NB   (γ free): β=0.44 [0.329, 0.656]  meanIP=10.74 [2.901, 45.045]  R0=4.572 [1.823, 17.634]
+    ODE-exp NB   (γ fixed):   β=0.686 [0.591, 0.79]  meanIP=4.0 d (fixed)  R0=2.745 [2.366, 3.158]
+    DDSA (line list):         β=0.489 [0.429, 0.557]  meanIP=6.383 [6.017, 6.799]  R0=3.119 [2.742, 3.568]  r=4 [4, 4]
 
 # Figure
 
