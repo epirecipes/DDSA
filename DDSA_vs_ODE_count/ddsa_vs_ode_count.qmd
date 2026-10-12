@@ -446,7 +446,7 @@ density!(pC, ipd; label="DDSA (shape r)", lw=2, color=:tomato)
 vline!(pC, [EW]; lw=1, ls=:dash, color=:black, label="truth 6.33")
 
 fig = plot(pA, pB, pC; layout=(1,3), size=(1350,380), dpi=300, left_margin=5Plots.mm, bottom_margin=5Plots.mm)
-figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
 mkpath(figdir)
 savefig(fig, joinpath(figdir, "fig_ddsa_vs_ode_count.pdf"))
 fig

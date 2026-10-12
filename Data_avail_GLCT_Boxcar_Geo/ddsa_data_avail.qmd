@@ -1093,7 +1093,7 @@ fig_summary = plot(r1, r2;
      plot_title       = "Data-availability scenarios: full vs partial line lists")
 
 let
-    figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
     mkpath(figdir)
     out = joinpath(figdir, "fig_data_avail_summary.pdf")
     savefig(fig_summary, out)
@@ -1280,7 +1280,7 @@ fig_ppc = plot(pA_ppc,   pAg_ppc,  pAbc_ppc,
      top_margin       = 2mm)
 
 let
-    figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
     mkpath(figdir)
     out = joinpath(figdir, "fig_data_avail_ppc.pdf")
     savefig(fig_ppc, out)

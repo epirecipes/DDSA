@@ -868,7 +868,7 @@ fig_posteriors = plot(p1, p2, p3, p4, p5, p6, p7, p8;
                       plot_title       = "GLCT posterior distributions — three-group M_θ analogue")
 
 let
-    figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
     mkpath(figdir)
     out = joinpath(figdir, "fig_hagelloch_mtheta_posteriors.pdf")
     savefig(fig_posteriors, out)
@@ -1081,7 +1081,7 @@ fig_ppc_glct = plot(p0, p1, p2;
                     background_color = :white)
 
 let
-    figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
     mkpath(figdir)
     out = joinpath(figdir, "fig_hagelloch_mtheta_ppc.pdf")
     savefig(fig_ppc_glct, out)

@@ -644,7 +644,7 @@ let
                dpi              = 300,
                background_color = :white)
 
-    figdir = joinpath(@__DIR__, "..", "Discrete_DSA_manuscript", "figures")
+    figdir = joinpath("..", "figures")   # repository-level figures/ folder (not tracked)
     mkpath(figdir)
     out = joinpath(figdir, "fig_drc_waves.pdf")
     savefig(fig, out)
