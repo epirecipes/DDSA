@@ -21,7 +21,7 @@ execute:
 
 ## Introduction
 
-In this example, we use a discrete-time SIR model and Turing.jl to infer the susceptible population $N$, the transmission rate ($\beta$), recovery-rate parameter ($\gamma$), and the initial infected proportion ($\rho$) from line-list data. This dataset originates from a study conducted on the H1N1 outbreak at Washington State University (WSU) in 2009, recording the number of daily cases over a period of 105 days. The dataset was obtained from [KhudaBukhsh et al. (2019)](https://github.com/cbskust/SDS.Epidemic/tree/master). The original raw data only included daily counts of new infections; KhudaBukhsh et al.\ reconstructed individual infection times from those counts and generated individual recovery times by sampling from an exponential distribution with rate $\gamma$ fixed at $1/5.5$ per day, the mean of prior infectious-period estimates. The resulting dataset (WSU.csv) contains individual-level infection times (first column) and recovery times (second column) for 2,276 cases, including 10 individuals whose recovery occurred after the 105-day observation window and are therefore treated as right-censored.
+In this example, we use a discrete-time SIR model and Turing.jl to infer the susceptible population $N$, the transmission rate ($\beta$), recovery-rate parameter ($\gamma$), and the initial infected proportion ($\rho$) from line-list data. This dataset originates from a study conducted on the H1N1 outbreak at Washington State University (WSU) in 2009, recording the number of daily cases over a period of 105 days (days 0–104). The dataset was obtained from [KhudaBukhsh et al. (2019)](https://github.com/cbskust/SDS.Epidemic/tree/master). The original raw data only included daily counts of new infections; KhudaBukhsh et al.\ reconstructed individual infection times from those counts and generated individual recovery times by sampling from an exponential distribution with rate $\gamma$ fixed at $1/5.5$ per day, the mean of prior infectious-period estimates. The resulting dataset (WSU.csv) contains individual-level infection times (first column) and recovery times (second column) for 2,276 cases, including 13 individuals whose recovery occurred after the end of the observation window (day 104) and are therefore treated as right-censored.
 
 ## Libraries
 
@@ -125,8 +125,12 @@ function load_real_data(csv_file::String, Tmax::Float64)
     K = length(ti)  # Total number of infections
     
     # Convert infection times to discrete time steps 
-    ti_discrete = clamp.(round.(Int, ti) .+ 1, 1, 1_000_000) #So day 0 isn't dropped
-    nsteps = max(maximum(ti_discrete), 105) # 105 days of data
+    # Calendar-day bins: step k holds the infection times in [k − 1, k), i.e. day k − 1 (day 0 is step 1).
+    # The recorded times are daily counts spread within each day, so floor recovers the daily counts.
+    ti_discrete = clamp.(floor.(Int, ti) .+ 1, 1, 1_000_000)
+    # Observation window T = 104 d, as in KhudaBukhsh et al.'s code (T.max = 104): daily counts for days 0–104, where
+    # the cases of day d ≥ 1 lie in (d − 1, d] and the 11 day-0 cases at t = 0.
+    nsteps = max(maximum(ti_discrete), 104)
     
     # Create histogram of infection times
     th = time_counts(ti_discrete, nsteps)
@@ -209,7 +213,7 @@ Load the WSU data and prepare the data for inference.
 #| echo: true
 #| output: false
 
-Tmax = 105.0
+Tmax = 104.0   # end of the observation window (days 0–104); recoveries after it are right-censored
 real_data = load_real_data("WSU.csv", Tmax)
 ```
 
@@ -561,7 +565,10 @@ display(p_susceptible)
 #| echo: false
 #| output: true
 
-# Calculate final epidemic size from the MCMC samples
+# Posterior predictive replicates of the final size: K_rep ~ Binomial(N, τ) for each draw. (τ·N alone would equal
+# the observed K by construction, because the draws of N come from P(N | K, τ).) A separate RNG keeps the global
+# random stream, used by later cells, unchanged.
+fs_rng = Xoshiro(2276)
 final_size_samples = Float64[]
 for i in 1:length(chain[:β])  
     β_i = chain[:β][i]
@@ -572,8 +579,8 @@ for i in 1:length(chain[:β])
     # Simulate with these parameters
     _, τ_i, _ = simulate(β_i, γ_i, ρ_i, nsteps)
     
-    # Calculate final epidemic size in absolute numbers
-    final_size = τ_i * N_i
+    # Replicate final size in absolute numbers
+    final_size = rand(fs_rng, Binomial(round(Int, N_i), τ_i))
     push!(final_size_samples, final_size)
 end
 
@@ -602,9 +609,9 @@ display(p_final_size)
 #| echo: false
 #| output: true
 
-println("Final size posterior: 
+println("Final size, posterior predictive replicates Binomial(N, τ) (observed K = $K): 
 median = $(round(final_size_median, digits=0))   
-95% CI = [$(round(final_size_ci[1], digits=0)), $(round(final_size_ci[2], digits=0))]")
+95% interval = [$(round(final_size_ci[1], digits=0)), $(round(final_size_ci[2], digits=0))]")
 ```
 
 ## Manuscript figure export
@@ -652,7 +659,9 @@ let
             gridcolor      = :gray,
             gridstyle      = :dash)
 
-    p_curve = bar(1:nsteps, real_data[:th];
+    # Bin k holds the infections of day k − 1, so bars and curves are plotted at day k − 1.
+    days = (1:nsteps) .- 1
+    p_curve = bar(days, real_data[:th];
                   label         = "Observed",
                   color         = :lightgray,
                   linecolor     = :gray,
@@ -660,25 +669,26 @@ let
                   bar_width     = 1.0,
                   xlabel        = "Day",
                   ylabel        = "Reported cases",
-                  title         = "(A) Posterior predictive epidemic curve",
+                  title         = "(A) Fitted epidemic curve",
+                  ylims         = (0, 1.05 * maximum(real_data[:th])),
                   left_margin   = 6mm,
                   right_margin  = 3mm,
                   bottom_margin = 5mm,
                   top_margin    = 2mm)
-    plot!(p_curve, 1:nsteps, f_median;
+    plot!(p_curve, days, f_median;
           ribbon    = (f_median .- f_lower, f_upper .- f_median),
           fillalpha = 0.4,
           fillcolor = :steelblue,
           lw        = 0,
           label     = "95% CrI",
           color     = :steelblue)
-    plot!(p_curve, 1:nsteps, f_median;
+    plot!(p_curve, days, f_median;
           lw    = 2.5,
           label = "Posterior median",
           color = :steelblue)
 
     # Thousands formatter for the N axis (avoids overlapping scientific notation).
-    fmt_thousands(x) = string(Int(round(x / 1000))) * "k"
+    fmt_thousands(x) = (v = x / 1000; isinteger(v) ? "$(Int(v))k" : "$(round(v, digits = 1))k")
 
     p_N = histogram(N_chain;
                     bins         = 40,
@@ -687,7 +697,7 @@ let
                     label        = "",
                     xlabel       = "N",
                     ylabel       = "density",
-                    title        = "(B) Susceptible population",
+                    title        = "(B) Population at risk",
                     xformatter   = fmt_thousands,
                     left_margin  = 5mm,
                     bottom_margin= 5mm,
@@ -748,7 +758,7 @@ gr()
 
 ## Discussion 
 
-The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed that the discrete SIR model, with geometric recovery times, captured the dynamics of the epidemic. The susceptible population $N$ has a posterior median of $11{,}664$ (95\% CI $[9{,}027,\,16{,}295]$), larger than the estimate of $7{,}051$ (90\% CI $[6{,}602,\,7{,}581]$) reported by KhudaBukhsh et al. (2020). The two analyses treat $N$ differently: here it enters through the Binomial final-size term and is summed out over a uniform prior, whereas KhudaBukhsh et al. impute it at each iteration as $n \sim \mathrm{NegBinom}(k, \tau)$ from the final-size equation and fix $\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.197$) and reproduction number ($R_0 = 1.01$, 95\% CI $[0.96,\,1.06]$) are close to theirs ($0.189$ and $1.06$), and the fitted mean infectious period ($5.12$ days) reproduces the mean recorded recovery interval.
+The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed that the discrete SIR model, with geometric recovery times, follows the overall decline of incidence but not the two early peaks (days 10 and 17). The population at risk $N$ has a posterior median of $14{,}144$ (95\% CI $[10{,}359,\,17{,}727]$), larger than the estimate of $7{,}051$ (90\% CI $[6{,}602,\,7{,}581]$) reported by KhudaBukhsh et al. (2020). The two analyses treat $N$ differently: here it enters through the Binomial final-size term and is summed out over a uniform prior, whereas KhudaBukhsh et al. impute it at each iteration as $n \sim \mathrm{NegBinom}(k, \tau)$ from the final-size equation and fix $\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.190$) agrees with theirs ($0.189$). The reproduction number ($R_0 = 0.97$, 95\% CI $[0.94,\,1.03]$) is slightly lower than theirs ($1.06$), which is consistent with the larger $N$, since it implies a smaller attack rate. Both estimates of $R_0$ lie close to 1. The fitted mean infectious period ($5.12$ days) reproduces the mean recorded recovery interval.
 
 This approach offers several advantages: a simple and interpretable modelling framework, fast computation and inference through Turing.jl, and clear parameter interpretation (transmission rate β, recovery rate γ, and initial infected proportion ρ). However, it's important to note that the model relies on key assumptions, including geometric recovery times and the modification of the original dataset to include recovery intervals, as the primary data only contained daily infection counts.
 

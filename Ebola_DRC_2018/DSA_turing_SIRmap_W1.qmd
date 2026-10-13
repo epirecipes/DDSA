@@ -10,7 +10,9 @@ format:
         code-overflow: wrap
     gfm: default
 execute:
-    cache: true
+    # No cache: Quarto's cache key ignores the data files, the shared modules and (for W3) the Wave 1–2 curve
+    # files read by the manuscript-figure cell, so a cached render could keep a stale figure. A render takes about a minute.
+    cache: false
 engine: julia
 julia:
     exeflags: ["--project=@."]
@@ -211,8 +213,10 @@ K_total = nrow(df_all)
 
 # Use all records with a known onset time: complete + onset_only
 onset_times_all = vcat(df_complete.onset, df_onset_only.onset)
-nsteps = Int(ceil(maximum(onset_times_all))) + 1
-ti_onset = max.(1, min.(Int.(round.(onset_times_all)) .+ 1, nsteps))
+# Calendar-day bins: step k holds the times in [k − 1, k), i.e. day k − 1 (day 0 is step 1). The grid ends on
+# the day of the last onset.
+nsteps = Int(floor(maximum(onset_times_all))) + 1
+ti_onset = max.(1, min.(Int.(floor.(onset_times_all)) .+ 1, nsteps))
 K_onset  = length(ti_onset)   # used in Multinomial
 th_onset = time_counts(ti_onset, nsteps)
 
@@ -223,7 +227,7 @@ same_day_complete = count(<(1), raw_delta_complete)
 delta_complete = max.(1, Int.(round.(raw_delta_complete)))
 
 # The "onset" column for e1=0 records contains the hospitalisation time.
-T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
+T_hosp_only = max.(1, min.(Int.(floor.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
@@ -596,6 +600,6 @@ end
 
 This example demonstrates a probabilistic programming approach to inference of individual infection and recovery times using a discrete version of dynamic survival analysis (DDSA) applied to Wave 1 of the Ebola outbreak data from the Democratic Republic of the Congo. The model provides posterior estimates for the transmission rate (β), recovery rate (γ), initial proportion of infected individuals (ρ), the implied initial infected count $I_0 = \rho N$, and the wave-specific effective at-risk scale (N) that enters the Binomial final-size observation model.
 
-Compared to the original implementation of DSA from Vossler et al. (2022), which used a stochastic SIR model solved via continuous-time ordinary differential equations (ODEs), we use a deterministic SIR map (discrete-time transition function) that updates the system state at discrete time steps using difference equations. Despite this difference in modelling approach, our posterior mean estimates for β, ρ fall within the 95% credible intervals of the original implementation: β = 0.19 [0.179, 0.202] (Vossler point estimate 0.190, CI [0.178, 0.204]); γ = 0.185 [0.172, 0.199] (Vossler 0.169 [0.157, 0.183]); $p_\gamma = 1 - e^{-\gamma}$ = 0.169 at the quoted γ, comparable to interpreting Vossler’s continuous removal rate on a daily scale; ρ = 0.00022 [0.00017, 0.00028] (Vossler 0.00021 [0.00016, 0.00027]); $I_0 = \rho N$ = 1.1 [0.8, 1.5]; $R_0 = \beta / p_\gamma$ = 1.126 (Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.91 days (Vossler 1/γ = 5.9 days).
+Compared to the original implementation of DSA from Vossler et al. (2022), which used a stochastic SIR model solved via continuous-time ordinary differential equations (ODEs), we use a deterministic SIR map (discrete-time transition function) that updates the system state at discrete time steps using difference equations. Despite this difference in modelling approach, our posterior medians for β, ρ fall within the 95% credible intervals of the original implementation: β = 0.191 [0.179, 0.202] (Vossler point estimate 0.190, CI [0.178, 0.204]); γ = 0.186 [0.172, 0.200] (Vossler 0.169 [0.157, 0.183]); $p_\gamma = 1 - e^{-\gamma}$ = 0.169 at the quoted γ, comparable to interpreting Vossler’s continuous removal rate on a daily scale; ρ = 0.00022 [0.00017, 0.00028] (Vossler 0.00021 [0.00016, 0.00027]); $I_0 = \rho N$ = 1.1 [0.8, 1.5]; $R_0 = \beta / p_\gamma$ = 1.125 (Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.90 days (Vossler 1/γ = 5.9 days).
 
 Vossler et al. (2022) reported inference with a joint likelihood across waves and a single effective population size $N$ shared by all waves (together with wave-specific transmission and removal parameters). Here we fit Wave 1 only, in its own time window with re-initialised compartmental conditions, so our $N$ is a wave-specific effective susceptible scale in $K \sim \mathrm{Binomial}(N,\tau)$ for that window. Thus, it is not the same globally pooled $N$ estimand, though both play the same role of linking observed case counts to the model-implied attack fraction $\tau$.

@@ -241,8 +241,10 @@ K_total = nrow(df_all)
 
 # Use all records with a known onset time: complete + onset_only
 onset_times_all = vcat(df_complete.onset, df_onset_only.onset)
-nsteps = Int(ceil(maximum(onset_times_all))) + 1
-ti_onset = max.(1, min.(Int.(round.(onset_times_all)) .+ 1, nsteps))
+# Calendar-day bins: step k holds the times in [k − 1, k), i.e. day k − 1 (day 0 is step 1). The grid ends on
+# the day of the last onset.
+nsteps = Int(floor(maximum(onset_times_all))) + 1
+ti_onset = max.(1, min.(Int.(floor.(onset_times_all)) .+ 1, nsteps))
 K_onset  = length(ti_onset)   # used in Multinomial
 th_onset = time_counts(ti_onset, nsteps)
 
@@ -253,7 +255,7 @@ same_day_complete = count(<(1), raw_delta_complete)
 delta_complete = max.(1, Int.(round.(raw_delta_complete)))
 
 # The "onset" column for e1=0 records contains the hospitalisation time.
-T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
+T_hosp_only = max.(1, min.(Int.(floor.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
@@ -269,7 +271,7 @@ Summary of the loaded data:
         of which complete (e1=1, e2=1):        679
         of which onset-only (e1=1, e2=0):      222
       Hosp-only (e1=0, e2=1, convolution):   6
-      nsteps: 302
+      nsteps: 301
       Same-day/sub-day complete intervals (<1 day): 85
       Recovery intervals range: 1–37 days
 
@@ -406,8 +408,8 @@ describe(chain)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 26.75 seconds
-    Compute duration  = 102.29 seconds
+    Wall duration     = 30.86 seconds
+    Compute duration  = 119.81 seconds
     parameters        = β, γ, ρ, N
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -416,10 +418,10 @@ describe(chain)
       parameters        mean        std      mcse    ess_bulk    ess_tail      rha ⋯
           Symbol     Float64    Float64   Float64     Float64     Float64   Float6 ⋯
 
-               β      0.1905     0.0061    0.0001   1750.8208   2305.0410    1.004 ⋯
-               γ      0.1855     0.0072    0.0002   1842.1312   2502.1466    1.004 ⋯
-               ρ      0.0002     0.0000    0.0000   2031.6398   2818.2184    1.001 ⋯
-               N   5059.9330   405.4985    5.7920   4855.2344   5135.7784    1.001 ⋯
+               β      0.1906     0.0060    0.0001   1707.2905   2347.1793    1.001 ⋯
+               γ      0.1857     0.0071    0.0002   1777.1635   2371.7315    1.001 ⋯
+               ρ      0.0002     0.0000    0.0000   2279.5824   2755.8283    1.001 ⋯
+               N   5128.6791   413.4713    5.3866   5872.5219   6515.8952    1.000 ⋯
 
                                                                    2 columns omitted
 
@@ -428,17 +430,17 @@ describe(chain)
       parameters        2.5%       25.0%       50.0%       75.0%       97.5% 
           Symbol     Float64     Float64     Float64     Float64     Float64 
 
-               β      0.1788      0.1865      0.1904      0.1947      0.2026
-               γ      0.1713      0.1807      0.1854      0.1903      0.1999
+               β      0.1790      0.1865      0.1906      0.1946      0.2023
+               γ      0.1719      0.1808      0.1856      0.1904      0.1996
                ρ      0.0002      0.0002      0.0002      0.0002      0.0003
-               N   4344.0000   4781.0000   5027.0000   5313.0000   5928.0250
+               N   4405.0000   4838.0000   5099.0000   5388.2500   6031.0750
 
 NUTS diagnostics:
 
     NUTS internals available: [:n_steps, :is_accept, :acceptance_rate, :log_density, :hamiltonian_energy, :hamiltonian_energy_error, :max_hamiltonian_energy_error, :tree_depth, :numerical_error, :step_size, :nom_step_size, :logprior, :loglikelihood, :logjoint]
     Divergent transitions: 0 / 8000
-    Max tree depth reached: 7.0
-    Step size ε (median [min, max]): 0.0853 [0.0483, 0.139]
+    Max tree depth reached: 9.0
+    Step size ε (median [min, max]): 0.0802 [0.0439, 0.112]
 
 We can also plot posterior distributions for each parameter.
 
@@ -520,16 +522,16 @@ posterior_table = (
 )
 ```
 
-    (N = (median = 5027.0, mean = 5060.0, q025 = 4344.0, q975 = 5928.0), β = (median = 0.1904, mean = 0.1905, q025 = 0.1788, q975 = 0.2026), γ = (median = 0.1854, mean = 0.1855, q025 = 0.1713, q975 = 0.1999), ρ = (median = 0.00022, mean = 0.00022, q025 = 0.00017, q975 = 0.00027), R0 = (median = 1.126, mean = 1.126, q025 = 1.111, q975 = 1.142), IP_steps = (median = 5.91, mean = 5.92, q025 = 5.52, q975 = 6.35), I0 = (median = 1.08, mean = 1.1, q025 = 0.77, q975 = 1.52), K_over_N = (median = 0.1804, mean = 0.1804, q025 = 0.153, q975 = 0.2088))
+    (N = (median = 5099.0, mean = 5129.0, q025 = 4405.0, q975 = 6031.0), β = (median = 0.1906, mean = 0.1906, q025 = 0.179, q975 = 0.2023), γ = (median = 0.1856, mean = 0.1857, q025 = 0.1719, q975 = 0.1996), ρ = (median = 0.00022, mean = 0.00022, q025 = 0.00017, q975 = 0.00028), R0 = (median = 1.125, mean = 1.125, q025 = 1.11, q975 = 1.141), IP_steps = (median = 5.9, mean = 5.91, q025 = 5.53, q975 = 6.33), I0 = (median = 1.11, mean = 1.13, q025 = 0.8, q975 = 1.53), K_over_N = (median = 0.1779, mean = 0.178, q025 = 0.1504, q975 = 0.2059))
 
-    N           median = 5027.0   mean = 5060.0   95% CI = [4344.0, 5928.0]
-    β           median = 0.1904   mean = 0.1905   95% CI = [0.1788, 0.2026]
-    γ           median = 0.1854   mean = 0.1855   95% CI = [0.1713, 0.1999]
-    ρ           median = 0.00022   mean = 0.00022   95% CI = [0.00017, 0.00027]
-    R0          median = 1.126   mean = 1.126   95% CI = [1.111, 1.142]
-    IP_steps    median = 5.91   mean = 5.92   95% CI = [5.52, 6.35]
-    I0          median = 1.08   mean = 1.1   95% CI = [0.77, 1.52]
-    K_over_N    median = 0.1804   mean = 0.1804   95% CI = [0.153, 0.2088]
+    N           median = 5099.0   mean = 5129.0   95% CI = [4405.0, 6031.0]
+    β           median = 0.1906   mean = 0.1906   95% CI = [0.179, 0.2023]
+    γ           median = 0.1856   mean = 0.1857   95% CI = [0.1719, 0.1996]
+    ρ           median = 0.00022   mean = 0.00022   95% CI = [0.00017, 0.00028]
+    R0          median = 1.125   mean = 1.125   95% CI = [1.11, 1.141]
+    IP_steps    median = 5.9   mean = 5.91   95% CI = [5.53, 6.33]
+    I0          median = 1.11   mean = 1.13   95% CI = [0.8, 1.53]
+    K_over_N    median = 0.1779   mean = 0.178   95% CI = [0.1504, 0.2059]
 
     Vossler et al. (2022) Wave 1 reference (continuous-time, β/γ):
       β = 0.190, γ = 0.169, ρ = 0.00021, β/γ = 1.124, 1/γ = 5.9 d
@@ -610,15 +612,15 @@ al. (2022), which used a stochastic SIR model solved via continuous-time
 ordinary differential equations (ODEs), we use a deterministic SIR map
 (discrete-time transition function) that updates the system state at
 discrete time steps using difference equations. Despite this difference
-in modelling approach, our posterior mean estimates for β, ρ fall within
-the 95% credible intervals of the original implementation: β = 0.19
+in modelling approach, our posterior medians for β, ρ fall within the
+95% credible intervals of the original implementation: β = 0.191
 \[0.179, 0.202\] (Vossler point estimate 0.190, CI \[0.178, 0.204\]); γ
-= 0.185 \[0.172, 0.199\] (Vossler 0.169 \[0.157, 0.183\]);
+= 0.186 \[0.172, 0.200\] (Vossler 0.169 \[0.157, 0.183\]);
 $p_\gamma = 1 - e^{-\gamma}$ = 0.169 at the quoted γ, comparable to
 interpreting Vossler’s continuous removal rate on a daily scale; ρ =
 0.00022 \[0.00017, 0.00028\] (Vossler 0.00021 \[0.00016, 0.00027\]);
-$I_0 = \rho N$ = 1.1 \[0.8, 1.5\]; $R_0 = \beta / p_\gamma$ = 1.126
-(Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.91 days
+$I_0 = \rho N$ = 1.1 \[0.8, 1.5\]; $R_0 = \beta / p_\gamma$ = 1.125
+(Vossler β/γ = 1.124); mean infectious period $1 / p_\gamma$ = 5.90 days
 (Vossler 1/γ = 5.9 days).
 
 Vossler et al. (2022) reported inference with a joint likelihood across

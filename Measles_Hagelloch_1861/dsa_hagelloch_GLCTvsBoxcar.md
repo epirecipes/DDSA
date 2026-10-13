@@ -638,8 +638,8 @@ chain = add_integer_draws(model_mtheta, chain, glct_propagate)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 286.05 seconds
-    Compute duration  = 1130.7 seconds
+    Wall duration     = 280.26 seconds
+    Compute duration  = 1108.09 seconds
     parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -693,8 +693,8 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 341.23 seconds
-    Compute duration  = 1327.91 seconds
+    Wall duration     = 324.71 seconds
+    Compute duration  = 1263.8 seconds
     parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -743,15 +743,15 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
       parameters         ess      rhat   ess_per_sec 
           Symbol     Float64   Float64       Float64 
 
-         beta_C1   2326.9100    1.0032        2.0579
-         beta_C2   2205.6167    1.0024        1.9507
-          beta_H   2429.1378    1.0015        2.1484
-          beta_G   1903.9150    1.0032        1.6838
-          mean_δ   3740.5520    1.0004        3.3082
+         beta_C1   2326.9100    1.0032        2.0999
+         beta_C2   2205.6167    1.0024        1.9905
+          beta_H   2429.1378    1.0015        2.1922
+          beta_G   1903.9150    1.0032        1.7182
+          mean_δ   3740.5520    1.0004        3.3757
             nb_r         NaN       NaN           NaN
-              N0   8008.4883    0.9998        7.0828
-              N1   6451.2862    1.0001        5.7056
-              N2   8218.7280    0.9998        7.2687
+              N0   8008.4883    0.9998        7.2273
+              N1   6451.2862    1.0001        5.8220
+              N2   8218.7280    0.9998        7.4170
 
 **Boxcar**
 
@@ -762,15 +762,15 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
       parameters         ess      rhat   ess_per_sec 
           Symbol     Float64   Float64       Float64 
 
-         beta_C1   1767.7906    1.0041        1.3313
-         beta_C2   1660.0152    1.0021        1.2501
-          beta_H   2037.9351    1.0037        1.5347
-          beta_G   1551.7200    1.0044        1.1685
-          mean_δ   4444.8425    1.0005        3.3472
-            nb_r   8016.0481    1.0000        6.0366
-              N0   7922.5611    0.9999        5.9662
-              N1   7125.3017    1.0003        5.3658
-              N2   8261.9266    1.0005        6.2218
+         beta_C1   1767.7906    1.0041        1.3988
+         beta_C2   1660.0152    1.0021        1.3135
+          beta_H   2037.9351    1.0037        1.6125
+          beta_G   1551.7200    1.0044        1.2278
+          mean_δ   4444.8425    1.0005        3.5170
+            nb_r   8016.0481    1.0000        6.3428
+              N0   7922.5611    0.9999        6.2688
+              N1   7125.3017    1.0003        5.6380
+              N2   8261.9266    1.0005        6.5374
 
 ## Posterior summaries
 
@@ -1041,8 +1041,8 @@ absorbed by $\beta_G$.
 The posterior attack rate for Class 1 ($\hat{\tau}_1 \approx K_1/N_1$)
 is consistent with DDSA recovering both the transmission dynamics and
 final size for internally homogeneous groups. The underprediction of
-attack rates for Classes 0 and 2 ($\hat{\tau} \approx 0.74$–$0.77$ vs
-observed $\approx 0.88$–$0.92$) is a consequence of the mean-field
+attack rates for Classes 0 and 2 ($\hat{\tau} \approx 0.75$–$0.77$ vs
+observed $\approx 0.88$–$0.91$) is a consequence of the mean-field
 approximation applied to groups with heterogeneous internal contact
 structure, and the $\beta$ estimates for these groups should be
 interpreted accordingly. A wider choice of $N_{\mathrm{total}}$
@@ -1070,7 +1070,8 @@ while Class 2’s main wave spans days 26–40, so
 the household-driven pre-school epidemic is correctly identified as a
 downstream consequence of the school outbreak.
 
-    Mean peak days:  Class 0=29.0,  Class 1=27.1,  Class 2=29.2
+    Mean peak days:  Class 0=28.0,  Class 1=26.1,  Class 2=28.2
+    Observed peak days (largest daily count): Class 0=35,  Class 1=22,  Class 2=32
     P(Class 1 peaks after Class 2) = 0.03
       → expected near 0: Class 1 should peak before Class 2's main wave
     P(Class 0 peaks after Class 1) = 1.0
@@ -1080,7 +1081,7 @@ In sum, both GLCT and Boxcar implementations produce consistent
 posteriors across all parameters, confirming that the two formulations
 are equivalent. With the integer parameters summed out of the
 likelihood, convergence is clean for all parameters in both
-implementations ($\hat{R} \le 1.003$, bulk ESS $\ge 1{,}490$ from 8,000
+implementations ($\hat{R} \le 1.005$, bulk ESS $\ge 1{,}550$ from 8,000
 draws). The household and global terms $\beta_H$ and $\beta_G$ remain
 only weakly separated (wide credible intervals for $\beta_H$ and
 $\beta_{C2}$), reflecting their limited identifiability under mean-field
@@ -1091,7 +1092,7 @@ $P(\beta_{C1}>\beta_{C2}) = 0.996$ (GLCT). It also identifies a positive
 household transmission route ($\beta_H > 0$), which characterises the
 pre-school epidemic as a secondary wave following the school outbreak,
 and gives consistent reproduction-number estimates between
-implementations (GLCT $R_0 = 2.17$, 95% CI $[2.01,\,2.37]$ vs. Boxcar
+implementations (GLCT $R_0 = 2.17$, 95% CI $[2.02,\,2.37]$ vs. Boxcar
 $R_0 = 2.17$, 95% CI $[2.02,\,2.37]$, both posterior medians). Although
 the model underpredicts attack rates for certain classes due to
 aggregating heterogeneous contact structure into mean-field terms, these

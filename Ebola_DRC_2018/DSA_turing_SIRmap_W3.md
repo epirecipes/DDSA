@@ -177,8 +177,10 @@ K_total = nrow(df_all)
 
 # Use all records with a known onset time: complete + onset_only
 onset_times_all = vcat(df_complete.onset, df_onset_only.onset)
-nsteps = Int(ceil(maximum(onset_times_all))) + 1
-ti_onset = max.(1, min.(Int.(round.(onset_times_all)) .+ 1, nsteps))
+# Calendar-day bins: step k holds the times in [k − 1, k), i.e. day k − 1 (day 0 is step 1). The grid ends on
+# the day of the last onset.
+nsteps = Int(floor(maximum(onset_times_all))) + 1
+ti_onset = max.(1, min.(Int.(floor.(onset_times_all)) .+ 1, nsteps))
 K_onset  = length(ti_onset)   # used in Multinomial
 th_onset = time_counts(ti_onset, nsteps)
 
@@ -189,7 +191,7 @@ same_day_complete = count(<(1), raw_delta_complete)
 delta_complete = max.(1, Int.(round.(raw_delta_complete)))
 
 # The "onset" column for e1=0 records contains the hospitalisation time.
-T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
+T_hosp_only = max.(1, min.(Int.(floor.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
@@ -205,7 +207,7 @@ Summary of the loaded data:
         of which complete (e1=1, e2=1):        747
         of which onset-only (e1=1, e2=0):      321
       Hosp-only (e1=0, e2=1, convolution):     1
-      nsteps: 109
+      nsteps: 108
       Same-day/sub-day complete intervals (<1 day): 101
       Recovery intervals range: 1–20 days
 
@@ -348,8 +350,8 @@ describe(chain)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 7.21 seconds
-    Compute duration  = 28.11 seconds
+    Wall duration     = 8.27 seconds
+    Compute duration  = 31.86 seconds
     parameters        = β, γ, ρ, N
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -358,10 +360,10 @@ describe(chain)
       parameters        mean        std      mcse    ess_bulk    ess_tail      rha ⋯
           Symbol     Float64    Float64   Float64     Float64     Float64   Float6 ⋯
 
-               β      0.2396     0.0076    0.0001   2834.8300   3825.5270    1.001 ⋯
-               γ      0.2423     0.0086    0.0002   2535.8951   3424.8922    1.000 ⋯
-               ρ      0.0068     0.0006    0.0000   2718.6402   3672.9384    1.000 ⋯
-               N   5268.4669   698.0992   10.2623   5486.0145   4348.2569    1.000 ⋯
+               β      0.2371     0.0079    0.0001   2769.8251   3574.1871    1.001 ⋯
+               γ      0.2420     0.0086    0.0002   2745.8789   3329.4949    1.002 ⋯
+               ρ      0.0067     0.0006    0.0000   2699.6426   3111.6734    1.001 ⋯
+               N   5689.9396   877.5223   16.6654   3980.4057   3545.0343    1.000 ⋯
 
                                                                    2 columns omitted
 
@@ -370,17 +372,17 @@ describe(chain)
       parameters        2.5%       25.0%       50.0%       75.0%       97.5% 
           Symbol     Float64     Float64     Float64     Float64     Float64 
 
-               β      0.2247      0.2344      0.2397      0.2448      0.2546
-               γ      0.2257      0.2364      0.2422      0.2480      0.2592
-               ρ      0.0057      0.0064      0.0067      0.0071      0.0079
-               N   4194.9750   4774.0000   5165.0000   5650.2500   6922.1000
+               β      0.2215      0.2317      0.2371      0.2425      0.2525
+               γ      0.2250      0.2361      0.2420      0.2478      0.2589
+               ρ      0.0055      0.0063      0.0067      0.0071      0.0079
+               N   4436.9750   5085.7500   5546.5000   6129.5000   7728.0000
 
 NUTS diagnostics:
 
     NUTS internals available: [:n_steps, :is_accept, :acceptance_rate, :log_density, :hamiltonian_energy, :hamiltonian_energy_error, :max_hamiltonian_energy_error, :tree_depth, :numerical_error, :step_size, :nom_step_size, :logprior, :loglikelihood, :logjoint]
-    Divergent transitions: 1 / 8000
-    Max tree depth reached: 6.0
-    Step size ε (median [min, max]): 0.288 [0.28, 0.725]
+    Divergent transitions: 0 / 8000
+    Max tree depth reached: 5.0
+    Step size ε (median [min, max]): 0.286 [0.119, 0.669]
 
 We can also plot posterior distributions for each parameter.
 
@@ -390,7 +392,7 @@ We can also plot posterior distributions for each parameter.
 ρ_med = median(chain[:ρ])
 N_med = median(chain[:N])
 
-# Vossler et al. (2022) Wave 1 reference values
+# Vossler et al. (2022) Wave 3 reference values
 p1 = histogram(chain[:β], label="", title="β", density=true)
 vline!(p1, [0.235], label="Ref (Vossler et al.)", color=:black, linestyle=:dash, linewidth=2)
 vline!(p1, [β_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)
@@ -462,16 +464,16 @@ posterior_table = (
 )
 ```
 
-    (N = (median = 5165.0, mean = 5268.0, q025 = 4195.0, q975 = 6922.0), β = (median = 0.2397, mean = 0.2396, q025 = 0.2247, q975 = 0.2546), γ = (median = 0.2422, mean = 0.2423, q025 = 0.2257, q975 = 0.2592), ρ = (median = 0.00675, mean = 0.00676, q025 = 0.00565, q975 = 0.00791), R0 = (median = 1.115, mean = 1.114, q025 = 1.075, q975 = 1.151), IP_steps = (median = 4.65, mean = 4.65, q025 = 4.38, q975 = 4.95), I0 = (median = 35.11, mean = 35.39, q025 = 28.46, q975 = 43.58), K_over_N = (median = 0.207, mean = 0.2062, q025 = 0.1544, q975 = 0.2548))
+    (N = (median = 5546.0, mean = 5690.0, q025 = 4437.0, q975 = 7728.0), β = (median = 0.2371, mean = 0.2371, q025 = 0.2215, q975 = 0.2525), γ = (median = 0.242, mean = 0.242, q025 = 0.225, q975 = 0.2589), ρ = (median = 0.00668, mean = 0.00669, q025 = 0.00549, q975 = 0.00791), R0 = (median = 1.104, mean = 1.103, q025 = 1.064, q975 = 1.14), IP_steps = (median = 4.65, mean = 4.66, q025 = 4.38, q975 = 4.96), I0 = (median = 37.45, mean = 37.73, q025 = 30.4, q975 = 46.53), K_over_N = (median = 0.1927, mean = 0.1918, q025 = 0.1383, q975 = 0.2409))
 
-    N           median = 5165.0   mean = 5268.0   95% CI = [4195.0, 6922.0]
-    β           median = 0.2397   mean = 0.2396   95% CI = [0.2247, 0.2546]
-    γ           median = 0.2422   mean = 0.2423   95% CI = [0.2257, 0.2592]
-    ρ           median = 0.00675   mean = 0.00676   95% CI = [0.00565, 0.00791]
-    R0          median = 1.115   mean = 1.114   95% CI = [1.075, 1.151]
-    IP_steps    median = 4.65   mean = 4.65   95% CI = [4.38, 4.95]
-    I0          median = 35.11   mean = 35.39   95% CI = [28.46, 43.58]
-    K_over_N    median = 0.207   mean = 0.2062   95% CI = [0.1544, 0.2548]
+    N           median = 5546.0   mean = 5690.0   95% CI = [4437.0, 7728.0]
+    β           median = 0.2371   mean = 0.2371   95% CI = [0.2215, 0.2525]
+    γ           median = 0.242   mean = 0.242   95% CI = [0.225, 0.2589]
+    ρ           median = 0.00668   mean = 0.00669   95% CI = [0.00549, 0.00791]
+    R0          median = 1.104   mean = 1.103   95% CI = [1.064, 1.14]
+    IP_steps    median = 4.65   mean = 4.66   95% CI = [4.38, 4.96]
+    I0          median = 37.45   mean = 37.73   95% CI = [30.4, 46.53]
+    K_over_N    median = 0.1927   mean = 0.1918   95% CI = [0.1383, 0.2409]
 
     Vossler et al. (2022) Wave 3 reference (continuous-time, β/γ):
       β = 0.235, γ = 0.214, ρ = 0.0067, β/γ = 1.098, 1/γ = 4.7 d
