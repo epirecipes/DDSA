@@ -1,0 +1,9 @@
+Grid vs Turing log-joint check (2026-10-12T10:39:35.848)
+ladder data (N = 99)          50 finite points: max |Turing log-joint − grid log density| = 2.27e-13
+sweep N = 99, R0 = 1.5        49 finite points: max |Turing log-joint − grid log density| = 1.14e-13
+sweep N = 99, R0 = 2.0        50 finite points: max |Turing log-joint − grid log density| = 2.27e-13
+sweep N = 99, R0 = 3.16       50 finite points: max |Turing log-joint − grid log density| = 2.27e-13
+sweep N = 1000, R0 = 1.5      48 finite points: max |Turing log-joint − grid log density| = 1.82e-12
+sweep N = 1000, R0 = 2.0      49 finite points: max |Turing log-joint − grid log density| = 1.82e-12
+sweep N = 1000, R0 = 3.16     50 finite points: max |Turing log-joint − grid log density| = 9.09e-13
+overall max difference: 1.82e-12 (supplement S8 states within 2e-12)

@@ -1,0 +1,12 @@
+# R and R packages for the authors' SDS.Epidemic code (get_authors_code.sh): the versions we ran for the supplement.
+# SDSMCMC comes from the SDS.Epidemic repository; the others from CRAN (MASS ships with R; RcppArmadillo is needed only
+# to build ramcmc from source).
+R 4.6.1
+SDSMCMC 0.1.0
+plyr 1.8.9
+MASS 7.3-65
+smfsb 1.5
+abind 1.4-8
+ramcmc 0.1.2
+Rcpp 1.1.2
+RcppArmadillo 15.6.0-1

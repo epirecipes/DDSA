@@ -1,0 +1,6 @@
+# the authors' code, downloaded by get_authors_code.sh (not distributed with this repository)
+external/SDS.Epidemic/
+external/DSA_refactor/
+external/Rlib/
+external/.venv/
+__pycache__/

@@ -1,0 +1,20 @@
+# Python packages for the authors' DSA_refactor code (get_authors_code.sh); the versions we ran with Python 3.14.6
+attrs==26.1.0
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.66.1
+future==1.0.0
+kiwisolver==1.5.1
+matplotlib==3.11.2
+networkx==3.7
+numpy==2.5.3
+packaging==26.3
+pillow==12.3.0
+pydoe==1.5.0
+pyparsing==3.3.3
+pyswarms==1.3.0
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+scipy==1.18.1
+six==1.17.0
+tqdm==4.70.1

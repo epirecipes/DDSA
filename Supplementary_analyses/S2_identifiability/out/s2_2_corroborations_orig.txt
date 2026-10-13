@@ -1,0 +1,5 @@
+Count-notebook data: K=91; identical onset histogram to the ladder data: true
+Original priors (β~U(1e-4,2.5), γ~U(0.02,1), i0~U(1e-4,0.2)) | R0=5.92 [1.76, 19.78] | meanIP=11.49 [1.73, 46.3] d | P(R0>5)=0.556 | R̂≤1.002 ESS≥1568 div=0 | 17 s
+R0~U(0.5,5), μ~U(1,30); i0 prior kept                     | R0=4.24 [2.2, 4.97] | meanIP=7.66 [2.8, 11.16] d | P(R0>5)=0.0 | R̂≤1.002 ESS≥2483 div=0 | 11 s
+Ladder priors: R0~U(0.5,5), μ~U(1,30), ρ~Beta(1,98)        | R0=4.14 [2.1, 4.97] | meanIP=7.16 [2.59, 10.51] d | P(R0>5)=0.0 | R̂≤1.004 ESS≥2004 div=0 | 13 s
+Ladder priors with R0~U(0.5,20)                             | R0=11.06 [5.14, 14.67] | meanIP=24.03 [9.6, 29.76] d | P(R0>5)=0.978 | R̂≤1.003 ESS≥2259 div=0 | 8 s
