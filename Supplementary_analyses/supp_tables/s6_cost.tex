@@ -1,0 +1,24 @@
+\begin{tabular}{l l r r r r r r}
+\toprule
+Section & Model & $n$ & $K$ & Log-lik.\ (ms) & Gradient (ms) & Fit (s) & ESS/s \\
+\midrule
+S3 & DDSA, geometric & 100 & 90 & 0.00267 & 0.00288 & 5.4 & 391 \\
+S3 & DSA & 100 & 90 & 0.152 & 0.216 & 17.0 & 101 \\
+S4 & DDSA, geometric, $N$ summed & 100 & 90 & 0.00433 & 0.00662 & 1.9 & 818 \\
+S4 & DSA, $n$ summed & 100 & 90 & 0.157 & 0.233 & 19.4 & 106 \\
+S4 & DSA, $n$ imputed (MH) & 100 & 90 & 0.149 & -- & 19.5 & 87 \\
+S3 & DDSA, geometric & 1{,}000 & 809 & 0.00246 & 0.00283 & 0.3 & 4.5e+03 \\
+S3 & DSA & 1{,}000 & 809 & 0.199 & 0.274 & 22.1 & 63.7 \\
+S4 & DDSA, geometric, $N$ summed & 1{,}000 & 809 & 0.0237 & 0.034 & 2.5 & 699 \\
+S4 & DSA, $n$ summed & 1{,}000 & 809 & 0.219 & 0.301 & 23.8 & 65.4 \\
+S4 & DSA, $n$ imputed (MH) & 1{,}000 & 809 & 0.187 & -- & 23.3 & 81.5 \\
+S3 & DDSA, geometric & 10{,}000 & 7{,}891 & 0.00238 & 0.00273 & 0.3 & 5.08e+03 \\
+S3 & DSA & 10{,}000 & 7{,}891 & 0.643 & 1.02 & 80.3 & 14 \\
+S4 & DDSA, geometric, $N$ summed & 10{,}000 & 7{,}891 & 0.184 & 0.301 & 20.8 & 80 \\
+S4 & DSA, $n$ summed & 10{,}000 & 7{,}891 & 0.902 & 1.28 & 97.9 & 14.1 \\
+S4 & DSA, $n$ imputed (MH) & 10{,}000 & 7{,}891 & 0.731 & -- & 80.8 & 27.1 \\
+S5 & DDSA, GLCT (NegBin DPH) & 9{,}950 & 8{,}540 & 0.0124 & 0.0151 & 3.0 & 396 \\
+S5 & DDSA, Boxcar (discretised Gamma) & 9{,}950 & 8{,}540 & 0.367 & 0.375 & 50.9 & 42.2 \\
+S5 & DSA, Gamma (renewal grid) & 9{,}950 & 8{,}540 & 0.4 & 1.17 & 113.1 & 16.1 \\
+\bottomrule
+\end{tabular}

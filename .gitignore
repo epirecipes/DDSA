@@ -16,6 +16,5 @@
 **/*_files/libs/
 **/*_files/mediabag/
 
-# Figure PDFs written by the notebooks, and folders that are not part of this repository
+# Figure PDFs written by the notebooks
 figures/
-Supplementary_analyses/

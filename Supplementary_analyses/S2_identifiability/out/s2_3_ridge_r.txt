@@ -1,0 +1,19 @@
+True early growth rate λ = 0.3643 /day (doubling time 1.9 d); truth R0 = 3.164, E[W] = 6.328
+Euler–Lotka check: R0_theory(r=4, μ=E[W], λ_true) = 3.164 (NegBin DPH with the truth mean; truth DPH is Erlang-from-mean, so close but not identical)
+R0≤5 rung 2: implied growth rate λ = 0.36 [0.3, 0.43] /day; R0 = 4.15 [2.42, 4.97]; mean IP = 8.84 [4.05, 12.23]; corr(log R0, log IP) = 0.896
+R0≤5 rung 1: implied growth rate λ = 0.36 [0.3, 0.43] /day; R0 = 3.11 [2.44, 4.44]; mean IP = 6.34 [3.76, 11.2]; corr(log R0, log IP) = 0.873
+R0≤5 rung 6: implied growth rate λ = 0.36 [0.31, 0.41] /day; R0 = 3.13 [2.74, 3.57]; mean IP = 6.4 [6.03, 6.83]; corr(log R0, log IP) = 0.253
+R0≤20 rung 2: implied growth rate λ = 0.37 [0.32, 0.43] /day; R0 = 10.09 [3.65, 14.59]; mean IP = 22.52 [7.46, 29.66]; corr(log R0, log IP) = 0.959
+R0≤20 rung 1: implied growth rate λ = 0.35 [0.28, 0.42] /day; R0 = 3.2 [2.46, 10.33]; mean IP = 6.7 [3.77, 27.74]; corr(log R0, log IP) = 0.956
+R0≤20 rung 6: implied growth rate λ = 0.36 [0.31, 0.41] /day; R0 = 3.13 [2.75, 3.58]; mean IP = 6.4 [6.04, 6.83]; corr(log R0, log IP) = 0.271
+
+Effective prior P(r) = [0.118, 0.114, 0.11, 0.106, 0.102, 0.098, 0.094, 0.09, 0.086, 0.082]; max possible KL (posterior = point mass at r=4) = 2.243 nats
+R0≤20 rung 1 DDSA Scen. B: P(r) = [0.03, 0.084, 0.142, 0.185, 0.191, 0.142, 0.095, 0.062, 0.04, 0.029] | KL(post‖prior) = 0.162 nats | entropy 2.124 (prior 2.296)
+R0≤20 rung 2 Discrete, Poisson: P(r) = [0.058, 0.079, 0.094, 0.103, 0.108, 0.111, 0.113, 0.112, 0.112, 0.11] | KL(post‖prior) = 0.04 nats | entropy 2.286 (prior 2.296)
+R0≤20 rung 3 Discrete, NegBin: P(r) = [0.064, 0.082, 0.094, 0.102, 0.107, 0.11, 0.111, 0.111, 0.11, 0.109] | KL(post‖prior) = 0.034 nats | entropy 2.29 (prior 2.296)
+R0≤20 rung 4 ODE, Poisson: P(r) = [0.043, 0.068, 0.088, 0.103, 0.113, 0.117, 0.118, 0.117, 0.117, 0.117] | KL(post‖prior) = 0.067 nats | entropy 2.267 (prior 2.296)
+R0≤20 rung 5 ODE, NegBin: P(r) = [0.05, 0.072, 0.089, 0.1, 0.107, 0.112, 0.115, 0.117, 0.118, 0.118] | KL(post‖prior) = 0.056 nats | entropy 2.276 (prior 2.296)
+R0≤20 rung 6 Full line list: P(r) = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | KL(post‖prior) = 2.243 nats | entropy 0.0 (prior 2.296)
+R0≤5  rung 1 DDSA Scen. B: P(r) = [0.031, 0.089, 0.155, 0.203, 0.205, 0.143, 0.09, 0.049, 0.024, 0.012] | KL(post‖prior) = 0.23 nats
+R0≤5  rung 2 Discrete, Poisson: P(r) = [0.028, 0.062, 0.106, 0.133, 0.147, 0.143, 0.134, 0.114, 0.083, 0.05] | KL(post‖prior) = 0.103 nats
+R0≤5  rung 6 Full line list: P(r) = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | KL(post‖prior) = 2.243 nats

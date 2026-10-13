@@ -1,0 +1,41 @@
+R0 ~ U(0.5, 20), mean IP ~ U(1, 30), ρ ~ Beta(1, N−1), r summed 1..10; truth: Erlang-4 DPH (E[W] = 6.328 d), one seed (ρ = 1/N)
+chains = 4, warm-up = 1000, draws = 2000 per chain
+
+== N=99, R0_true=1.5, τ_true=0.583, T=90 d, K=56 (K/N=0.566), predicted info ratio 1/(1−τ)=2.4, SD ratio sqrt=1.55
+  rung 1: R0=1.49 [1.35, 1.68] width=0.33 | meanIP=8.68 [4.82, 13.78] | τ=0.58 [0.48, 0.67] SD(τ)=0.049 | P(R0>5)=0.0 | R̂≤1.002 ESS≥2141 div=0 | 19 s
+      R̂ by parameter: R0 1.001 (ESS 3546), meanIP 1.001 (ESS 2141), ρ 1.002
+      per-chain median R0 [1.49, 1.49, 1.49, 1.49]
+      per-chain median meanIP [8.69, 8.63, 8.76, 8.65]
+      per-chain mean log-joint [-79.5, -79.5, -79.5, -79.4]
+  rung 2: R0=1.53 [1.33, 1.96] width=0.64 | meanIP=9.09 [4.58, 16.3] | τ=0.6 [0.46, 0.76] SD(τ)=0.0781 | P(R0>5)=0.0 | R̂≤1.003 ESS≥1746 div=0 | 17 s
+      R̂ by parameter: R0 1.001 (ESS 2431), meanIP 1.003 (ESS 1746), ρ 1.002
+      per-chain median R0 [1.54, 1.53, 1.54, 1.53]
+      per-chain median meanIP [9.31, 8.97, 9.19, 8.91]
+      per-chain mean log-joint [-80.1, -80.0, -80.1, -80.1]
+  ratios (rung 2 / rung 1): SD(τ) 1.59, R0 width 1.93, log-R0 width 1.8  vs sqrt(1/(1−τ)) = 1.55
+
+== N=99, R0_true=2.0, τ_true=0.79, T=65 d, K=80 (K/N=0.808), predicted info ratio 1/(1−τ)=4.76, SD ratio sqrt=2.18
+  rung 1: R0=2.15 [1.84, 2.59] width=0.75 | meanIP=7.57 [4.26, 11.32] | τ=0.82 [0.74, 0.89] SD(τ)=0.0375 | P(R0>5)=0.0 | R̂≤1.006 ESS≥1068 div=0 | 9 s
+      R̂ by parameter: R0 1.002 (ESS 2041), meanIP 1.006 (ESS 1068), ρ 1.003
+      per-chain median R0 [2.15, 2.16, 2.14, 2.17]
+      per-chain median meanIP [7.53, 7.68, 7.4, 7.65]
+      per-chain mean log-joint [-64.7, -64.7, -64.8, -64.8]
+  rung 2: R0=4.37 [1.99, 7.47] width=5.48 | meanIP=18.56 [6.26, 29.49] | τ=0.96 [0.78, 0.99] SD(τ)=0.0557 | P(R0>5)=0.389 | R̂≤1.005 ESS≥1042 div=1 | 40 s
+      R̂ by parameter: R0 1.004 (ESS 1059), meanIP 1.005 (ESS 1042), ρ 1.003
+      per-chain median R0 [4.6, 4.23, 4.41, 4.14]
+      per-chain median meanIP [19.68, 18.15, 18.83, 17.49]
+      per-chain mean log-joint [-66.0, -65.9, -65.9, -65.9]
+  ratios (rung 2 / rung 1): SD(τ) 1.49, R0 width 7.32, log-R0 width 3.88  vs sqrt(1/(1−τ)) = 2.18
+
+== N=99, R0_true=3.16, τ_true=0.941, T=40 d, K=91 (K/N=0.919), predicted info ratio 1/(1−τ)=16.96, SD ratio sqrt=4.12
+  rung 1: R0=3.2 [2.46, 10.41] width=7.95 | meanIP=6.66 [3.64, 27.77] | τ=0.94 [0.88, 0.98] SD(τ)=0.0267 | P(R0>5)=0.128 | R̂≤1.013 ESS≥367 div=0 | 16 s
+      R̂ by parameter: R0 1.009 (ESS 456), meanIP 1.013 (ESS 367), ρ 1.01
+      per-chain median R0 [3.19, 3.15, 3.21, 3.27]
+      per-chain median meanIP [6.58, 6.36, 6.72, 6.98]
+      per-chain mean log-joint [-46.1, -46.1, -46.2, -46.4]
+  rung 2: R0=10.06 [3.6, 14.72] width=11.12 | meanIP=22.32 [7.29, 29.65] | τ=0.99 [0.96, 1.0] SD(τ)=0.01 | P(R0>5)=0.916 | R̂≤1.012 ESS≥236 div=6 | 23 s
+      R̂ by parameter: R0 1.011 (ESS 255), meanIP 1.012 (ESS 236), ρ 1.002
+      per-chain median R0 [9.94, 9.51, 10.26, 10.35]
+      per-chain median meanIP [22.27, 20.94, 22.9, 22.89]
+      per-chain mean log-joint [-44.9, -45.0, -44.9, -44.9]
+  ratios (rung 2 / rung 1): SD(τ) 0.37, R0 width 1.4, log-R0 width 0.98  vs sqrt(1/(1−τ)) = 4.12

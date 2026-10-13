@@ -1,0 +1,20 @@
+N-sum table 8001 τ × 40 ρ in 90.9 s; max |interp − exact| over 3000 random (τ, ρ) = 2.1e-5 log-units
+Grid 10×116×90×40 (r, μ step 0.25, R0 step 0.05, ρ ∈ [1e-6, 0.3] 40 log points) in 11 s; max |grid ll − exact ll_I0| over 2000 random cells = 2.4e-5
+Posterior mass with τ < 0.5 (large-N / small-attack region): 4.50085261429257e-5
+Max log posterior density: τ ≥ 0.5 region -44.0; τ < 0.5 region -46.52
+At old mode B (R0≈0.52, μ≈13.9, ρ≈0.0094): max over r of log posterior = -130.49 (global max -44.0)
+Local maxima of the r-summed log density (value, μ, R0, ρ), top 10:
+   (-42.26, 11.12, 4.925, 0.01182)
+   (-42.26, 10.88, 4.825, 0.01182)
+   (-42.27, 10.62, 4.725, 0.01182)
+   (-42.28, 10.38, 4.625, 0.01182)
+   (-42.29, 10.12, 4.825, 0.008556)
+   (-42.29, 10.12, 4.525, 0.01182)
+   (-42.3, 10.38, 4.925, 0.008556)
+   (-42.44, 9.125, 4.375, 0.008556)
+   (-42.45, 9.375, 4.475, 0.008556)
+   (-42.45, 9.625, 4.625, 0.008556)
+Exact posterior: R0 = 4.175 [2.225, 4.975] | meanIP = 8.875 [3.375, 12.375] | ρ = 0.009 [0.003, 0.023] | τ = 0.971 [0.853, 0.986]
+   N = 94.0 [91.0, 108.0]  P(N ≤ 99) = 0.912 | I0 = 0.89 [0.41, 2.17]
+   P(r) = [0.029, 0.07, 0.108, 0.13, 0.141, 0.139, 0.133, 0.115, 0.085, 0.051] | edge mass: R0 0.036, ρ 2.1e-27
+Reference, rung 2 (Poisson counts, N = 99): R0 4.15 [2.42, 4.97], meanIP 8.84 [4.05, 12.23]
