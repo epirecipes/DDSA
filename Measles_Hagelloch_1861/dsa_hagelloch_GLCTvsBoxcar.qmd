@@ -838,12 +838,14 @@ default(guidefontsize  = 9,
         gridcolor      = :gray,
         gridstyle      = :dash)
 
-function posterior_panel(samples; title, color)
+function posterior_panel(samples; title, color, integer = false)
+    # Integer-valued parameters get one bin per value, so the bar heights are posterior probabilities.
     histogram(samples;
+              bins      = integer ? ((minimum(samples) - 0.5):1:(maximum(samples) + 0.5)) : :auto,
               normalize = :pdf,
               label     = "",
               title     = title,
-              ylabel    = "density",
+              ylabel    = integer ? "probability" : "density",
               color     = color,
               linecolor = :gray,
               linewidth = 0.3)
@@ -854,9 +856,9 @@ p2 = posterior_panel(vec(chain[:beta_C2]); title="β_C2", color=:tomato)
 p3 = posterior_panel(vec(chain[:beta_H]);  title="β_H",  color=:forestgreen)
 p4 = posterior_panel(vec(chain[:beta_G]);  title="β_G",  color=:purple)
 p5 = posterior_panel(vec(chain[:mean_δ]);  title="mean δ (calendar IP)", color=:steelblue)
-p6 = posterior_panel(vec(chain[:N0]);      title="N₀ (pre-school)",      color=:forestgreen)
-p7 = posterior_panel(vec(chain[:N1]);      title="N₁ (class 1)",         color=:steelblue)
-p8 = posterior_panel(vec(chain[:N2]);      title="N₂ (class 2)",         color=:tomato)
+p6 = posterior_panel(vec(chain[:N0]);      title="N₀ (pre-school)",      color=:forestgreen, integer=true)
+p7 = posterior_panel(vec(chain[:N1]);      title="N₁ (class 1)",         color=:steelblue,   integer=true)
+p8 = posterior_panel(vec(chain[:N2]);      title="N₂ (class 2)",         color=:tomato,      integer=true)
 fig_posteriors = plot(p1, p2, p3, p4, p5, p6, p7, p8;
                       layout           = (2, 4),
                       size             = (1200, 500),
@@ -1022,18 +1024,21 @@ default(guidefontsize  = 9,
         gridcolor      = :gray,
         gridstyle      = :dash)
 
-function ppc_bands(f_mat, K_obs)
-    pred = f_mat .* K_obs
+# Expected new infections per day in each class: f_k τ_k N_k for each posterior draw, so the curves show the
+# model's own epidemic size (they are not rescaled to the observed counts).
+function ppc_bands(f_mat, totals)
+    pred = f_mat .* totals'
     lo  = [quantile(pred[t,:], 0.025) for t in axes(pred,1)]
     mid = [quantile(pred[t,:], 0.50)  for t in axes(pred,1)]
     hi  = [quantile(pred[t,:], 0.975) for t in axes(pred,1)]
     return lo, mid, hi
 end
 
-days = 1:nsteps
-lo0, mid0, hi0 = ppc_bands(f0_ppc, K0)
-lo1, mid1, hi1 = ppc_bands(f1_ppc, K1)
-lo2, mid2, hi2 = ppc_bands(f2_ppc, K2)
+days = (1:nsteps) .- 1   # bin k holds the infections of day k − 1 (day 0 = first infection)
+ppc_idx = round.(Int, range(1, length(vec(chain[:beta_C1])), length = size(f0_ppc, 2)))   # draws used above
+lo0, mid0, hi0 = ppc_bands(f0_ppc, τ0_post .* vec(chain[:N0])[ppc_idx])
+lo1, mid1, hi1 = ppc_bands(f1_ppc, τ1_post .* vec(chain[:N1])[ppc_idx])
+lo2, mid2, hi2 = ppc_bands(f2_ppc, τ2_post .* vec(chain[:N2])[ppc_idx])
 ymax_glct = max(1.0, maximum(vcat(th0, th1, th2, hi0, hi1, hi2)))
 
 function ppc_panel(days, th, lo, mid, hi; title, color, ylims)
@@ -1128,9 +1133,10 @@ end
 #| output: true
 #| label: fig-ppc-boxcar
 
-lo0_bc, mid0_bc, hi0_bc = ppc_bands(f0_ppc_bc, K0)
-lo1_bc, mid1_bc, hi1_bc = ppc_bands(f1_ppc_bc, K1)
-lo2_bc, mid2_bc, hi2_bc = ppc_bands(f2_ppc_bc, K2)
+ppc_idx_bc = round.(Int, range(1, length(vec(chain_bc[:beta_C1])), length = size(f0_ppc_bc, 2)))
+lo0_bc, mid0_bc, hi0_bc = ppc_bands(f0_ppc_bc, τ0_bc .* vec(chain_bc[:N0])[ppc_idx_bc])
+lo1_bc, mid1_bc, hi1_bc = ppc_bands(f1_ppc_bc, τ1_bc .* vec(chain_bc[:N1])[ppc_idx_bc])
+lo2_bc, mid2_bc, hi2_bc = ppc_bands(f2_ppc_bc, τ2_bc .* vec(chain_bc[:N2])[ppc_idx_bc])
 ymax_boxcar = max(1.0, maximum(vcat(th0, th1, th2, hi0_bc, hi1_bc, hi2_bc)))
 
 p0 = bar(days, th0; label="Observed", color=:forestgreen, alpha=0.5,
@@ -1206,7 +1212,7 @@ println("  3. β_G > 0:      $(β_G_m > 0)  (NR: global mixing component)")
 println("  4. P(β_C1>β_C2) = $(round(mean(vec(chain[:beta_C1]) .> vec(chain[:beta_C2])),digits=3))")
 ```
 
-The posterior attack rate for Class 1 ($\hat{\tau}_1 \approx K_1/N_1$) is consistent with DDSA recovering both the transmission dynamics and final size for internally homogeneous groups. The underprediction of attack rates for Classes 0 and 2 ($\hat{\tau} \approx 0.74$--$0.77$ vs observed $\approx 0.88$--$0.92$) is a consequence of the mean-field approximation applied to groups with heterogeneous internal contact structure, and the $\beta$ estimates for these groups should be interpreted accordingly. A wider choice of $N_{\mathrm{total}}$ (i.e.\ relaxing the census bound of 197 children under 14) would increase the uncertainty on $N_0$ and $N_2$ but would not qualitatively change the recovered parameter ordering or the $\beta_{C1} > \beta_{C2}$ finding.
+The posterior attack rate for Class 1 ($\hat{\tau}_1 \approx K_1/N_1$) is consistent with DDSA recovering both the transmission dynamics and final size for internally homogeneous groups. The underprediction of attack rates for Classes 0 and 2 ($\hat{\tau} \approx 0.75$--$0.77$ vs observed $\approx 0.88$--$0.91$) is a consequence of the mean-field approximation applied to groups with heterogeneous internal contact structure, and the $\beta$ estimates for these groups should be interpreted accordingly. A wider choice of $N_{\mathrm{total}}$ (i.e.\ relaxing the census bound of 197 children under 14) would increase the uncertainty on $N_0$ and $N_2$ but would not qualitatively change the recovered parameter ordering or the $\beta_{C1} > \beta_{C2}$ finding.
 
 For the infectious period, `dph_negative_binomial_min_support` enforces $r \leq \delta_{\min}$ when $\delta_{\min}$ is the calendar minimum (here, 4 days), so $r$ cannot exceed 4 in this construction. The dwell-time parameters are in any case estimated jointly with transmission. A hard upper bound on $r$ can make residual marginal misfit interpretable as a model-class limit rather than as precise identification of $r$, but the fit is still consistent with the data.
 
@@ -1240,16 +1246,19 @@ In the observed data, Class 1 infection times cluster around days 21–28 while 
 #| echo: false
 #| output: true
 
-peak0 = [argmax(f0_ppc[:, k]) for k in axes(f0_ppc, 2)]
-peak1 = [argmax(f1_ppc[:, k]) for k in axes(f1_ppc, 2)]
-peak2 = [argmax(f2_ppc[:, k]) for k in axes(f2_ppc, 2)]
+# Peak days (day 0 = first infection; bin k holds day k − 1)
+peak0 = [argmax(f0_ppc[:, k]) - 1 for k in axes(f0_ppc, 2)]
+peak1 = [argmax(f1_ppc[:, k]) - 1 for k in axes(f1_ppc, 2)]
+peak2 = [argmax(f2_ppc[:, k]) - 1 for k in axes(f2_ppc, 2)]
 
 println("Mean peak days:  Class 0=$(round(mean(peak0), digits=1)),  " *
         "Class 1=$(round(mean(peak1), digits=1)),  Class 2=$(round(mean(peak2), digits=1))")
+println("Observed peak days (largest daily count): Class 0=$(argmax(th0) - 1),  " *
+        "Class 1=$(argmax(th1) - 1),  Class 2=$(argmax(th2) - 1)")
 println("P(Class 1 peaks after Class 2) = $(round(mean(peak1 .>= peak2), digits=3))")
 println("  → expected near 0: Class 1 should peak before Class 2's main wave")
 println("P(Class 0 peaks after Class 1) = $(round(mean(peak0 .>= peak1), digits=3))")
 println("  → expected near 1: pre-school wave is driven by household transmission from school children")
 ```
 
-In sum, both GLCT and Boxcar implementations produce consistent posteriors across all parameters, confirming that the two formulations are equivalent. With the integer parameters summed out of the likelihood, convergence is clean for all parameters in both implementations ($\hat{R} \le 1.003$, bulk ESS $\ge 1{,}490$ from 8,000 draws). The household and global terms $\beta_H$ and $\beta_G$ remain only weakly separated (wide credible intervals for $\beta_H$ and $\beta_{C2}$), reflecting their limited identifiability under mean-field contact structure. The model captures the primary qualitative dynamics by recovering a higher transmission rate in the younger school class compared to the older class with posterior probability $P(\beta_{C1}>\beta_{C2}) = 0.996$ (GLCT). It also identifies a positive household transmission route ($\beta_H > 0$), which characterises the pre-school epidemic as a secondary wave following the school outbreak, and gives consistent reproduction-number estimates between implementations (GLCT $R_0 = 2.17$, 95\% CI $[2.01,\,2.37]$ vs.\ Boxcar $R_0 = 2.17$, 95\% CI $[2.02,\,2.37]$, both posterior medians). Although the model underpredicts attack rates for certain classes due to aggregating heterogeneous contact structure into mean-field terms, these results do not alter the directional findings.
+In sum, both GLCT and Boxcar implementations produce consistent posteriors across all parameters, confirming that the two formulations are equivalent. With the integer parameters summed out of the likelihood, convergence is clean for all parameters in both implementations ($\hat{R} \le 1.005$, bulk ESS $\ge 1{,}550$ from 8,000 draws). The household and global terms $\beta_H$ and $\beta_G$ remain only weakly separated (wide credible intervals for $\beta_H$ and $\beta_{C2}$), reflecting their limited identifiability under mean-field contact structure. The model captures the primary qualitative dynamics by recovering a higher transmission rate in the younger school class compared to the older class with posterior probability $P(\beta_{C1}>\beta_{C2}) = 0.996$ (GLCT). It also identifies a positive household transmission route ($\beta_H > 0$), which characterises the pre-school epidemic as a secondary wave following the school outbreak, and gives consistent reproduction-number estimates between implementations (GLCT $R_0 = 2.17$, 95\% CI $[2.02,\,2.37]$ vs.\ Boxcar $R_0 = 2.17$, 95\% CI $[2.02,\,2.37]$, both posterior medians). Although the model underpredicts attack rates for certain classes due to aggregating heterogeneous contact structure into mean-field terms, these results do not alter the directional findings.

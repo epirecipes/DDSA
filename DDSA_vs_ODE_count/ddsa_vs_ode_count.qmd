@@ -396,7 +396,7 @@ default(guidefontsize=9, tickfontsize=8, legendfontsize=6, titlefontsize=10,
 ndraw = 150
 function ppc_count(ch, model_ode, statedim, ncomp)
     i0s, βs = vec(ch[:i0]), vec(ch[:β])
-    γs = :γ in propertynames(ch) ? vec(ch[:γ]) : fill(γ_fix, length(βs))
+    γs = :γ in names(ch) ? vec(ch[:γ]) : fill(γ_fix, length(βs))   # names(ch): parameter names (propertynames gives struct fields)
     idx = rand(1:length(βs), ndraw); M = zeros(nsteps, ndraw)
     for (j,i) in enumerate(idx)
         I0 = i0s[i]*N; u0 = zeros(ncomp); u0[1]=N-I0; u0[2]=I0

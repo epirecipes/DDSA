@@ -9,8 +9,8 @@ the susceptible population $N$, the transmission rate ($\beta$),
 recovery-rate parameter ($\gamma$), and the initial infected proportion
 ($\rho$) from line-list data. This dataset originates from a study
 conducted on the H1N1 outbreak at Washington State University (WSU) in
-2009, recording the number of daily cases over a period of 105 days. The
-dataset was obtained from [KhudaBukhsh et
+2009, recording the number of daily cases over a period of 105 days
+(days 0–104). The dataset was obtained from [KhudaBukhsh et
 al. (2019)](https://github.com/cbskust/SDS.Epidemic/tree/master). The
 original raw data only included daily counts of new infections;
 KhudaBukhsh et al. reconstructed individual infection times from those
@@ -18,9 +18,9 @@ counts and generated individual recovery times by sampling from an
 exponential distribution with rate $\gamma$ fixed at $1/5.5$ per day,
 the mean of prior infectious-period estimates. The resulting dataset
 (WSU.csv) contains individual-level infection times (first column) and
-recovery times (second column) for 2,276 cases, including 10 individuals
-whose recovery occurred after the 105-day observation window and are
-therefore treated as right-censored.
+recovery times (second column) for 2,276 cases, including 13 individuals
+whose recovery occurred after the end of the observation window (day
+104) and are therefore treated as right-censored.
 
 ## Libraries
 
@@ -117,8 +117,12 @@ function load_real_data(csv_file::String, Tmax::Float64)
     K = length(ti)  # Total number of infections
     
     # Convert infection times to discrete time steps 
-    ti_discrete = clamp.(round.(Int, ti) .+ 1, 1, 1_000_000) #So day 0 isn't dropped
-    nsteps = max(maximum(ti_discrete), 105) # 105 days of data
+    # Calendar-day bins: step k holds the infection times in [k − 1, k), i.e. day k − 1 (day 0 is step 1).
+    # The recorded times are daily counts spread within each day, so floor recovers the daily counts.
+    ti_discrete = clamp.(floor.(Int, ti) .+ 1, 1, 1_000_000)
+    # Observation window T = 104 d, as in KhudaBukhsh et al.'s code (T.max = 104): daily counts for days 0–104, where
+    # the cases of day d ≥ 1 lie in (d − 1, d] and the 11 day-0 cases at t = 0.
+    nsteps = max(maximum(ti_discrete), 104)
     
     # Create histogram of infection times
     th = time_counts(ti_discrete, nsteps)
@@ -199,7 +203,7 @@ end
 Load the WSU data and prepare the data for inference.
 
 ``` julia
-Tmax = 105.0
+Tmax = 104.0   # end of the observation window (days 0–104); recoveries after it are right-censored
 real_data = load_real_data("WSU.csv", Tmax)
 ```
 
@@ -212,11 +216,11 @@ bar(0:(real_data[:nsteps] - 1), real_data[:th], title="Infection time observatio
 ![](dsa_WSU_Turing_files/figure-commonmark/cell-7-output-1.svg)
 
     Total infections: 2276
-    Time steps: 105
-    Number of censored observations: 10
+    Time steps: 104
+    Number of censored observations: 13
     Mean infection time: 26.64
     Mean recovery interval: 5.0
-    Peak infections: 149 at time step 19
+    Peak infections: 169 at time step 18
 
 ## Turing model
 
@@ -343,8 +347,8 @@ describe(chain)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 8.87 seconds
-    Compute duration  = 33.92 seconds
+    Wall duration     = 10.75 seconds
+    Compute duration  = 39.51 seconds
     parameters        = β, γ, ρ, N
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -353,22 +357,22 @@ describe(chain)
       parameters         mean         std      mcse    ess_bulk    ess_tail      r ⋯
           Symbol      Float64     Float64   Float64     Float64     Float64   Floa ⋯
 
-               β       0.1969      0.0064    0.0001   3252.8227   3370.9567    1.0 ⋯
-               γ       0.2174      0.0046    0.0001   3234.3286   3572.2169    1.0 ⋯
-               ρ       0.0280      0.0029    0.0000   3538.8250   3762.6974    1.0 ⋯
-               N   11952.6784   1890.6608   32.7553   3532.0687   3456.1346    1.0 ⋯
+               β       0.1902      0.0058    0.0001   2974.6294   3093.1007    1.0 ⋯
+               γ       0.2172      0.0045    0.0001   3313.9705   3577.7443    1.0 ⋯
+               ρ       0.0259      0.0028    0.0000   3264.8749   3349.6148    1.0 ⋯
+               N   14176.5841   2017.1958   35.6290   3223.7847   3911.0705    1.0 ⋯
 
                                                                    2 columns omitted
 
     Quantiles
 
-      parameters        2.5%        25.0%        50.0%        75.0%        97.5% 
-          Symbol     Float64      Float64      Float64      Float64      Float64 
+      parameters         2.5%        25.0%        50.0%        75.0%        97.5% 
+          Symbol      Float64      Float64      Float64      Float64      Float64 
 
-               β      0.1839       0.1925       0.1970       0.2013       0.2091
-               γ      0.2086       0.2143       0.2174       0.2205       0.2263
-               ρ      0.0221       0.0261       0.0282       0.0300       0.0333
-               N   9061.9750   10554.0000   11663.5000   13068.0000   16541.2000
+               β       0.1795       0.1862       0.1900       0.1939       0.2027
+               γ       0.2083       0.2142       0.2172       0.2203       0.2261
+               ρ       0.0212       0.0237       0.0257       0.0278       0.0318
+               N   10358.8750   12656.0000   14144.0000   15776.0000   17727.0000
 
 Plot trace plots for MCMC diagnostics
 
@@ -421,23 +425,23 @@ posterior_table = (
 )
 ```
 
-    (N = (median = 11664.0, mean = 11953.0, q025 = 9062.0, q975 = 16541.0), β = (median = 0.197, mean = 0.1969, q025 = 0.1839, q975 = 0.2091), γ = (median = 0.2174, mean = 0.2174, q025 = 0.2086, q975 = 0.2263), ρ = (median = 0.0282, mean = 0.028, q025 = 0.0221, q975 = 0.0333), R0 = (median = 1.0077, mean = 1.0077, q025 = 0.9528, q975 = 1.062), IP_steps = (median = 5.12, mean = 5.12, q025 = 4.94, q975 = 5.31), K_over_N = (median = 0.1951, mean = 0.195, q025 = 0.1376, q975 = 0.2512))
+    (N = (median = 14144.0, mean = 14177.0, q025 = 10359.0, q975 = 17727.0), β = (median = 0.19, mean = 0.1902, q025 = 0.1795, q975 = 0.2027), γ = (median = 0.2172, mean = 0.2172, q025 = 0.2083, q975 = 0.2261), ρ = (median = 0.0257, mean = 0.0259, q025 = 0.0212, q975 = 0.0318), R0 = (median = 0.9714, mean = 0.9745, q025 = 0.9394, q975 = 1.028), IP_steps = (median = 5.12, mean = 5.12, q025 = 4.94, q975 = 5.32), K_over_N = (median = 0.1609, mean = 0.164, q025 = 0.1284, q975 = 0.2197))
 
-    N           median = 11664.0   mean = 11953.0   95% CI = [9062.0, 16541.0]
-    β           median = 0.197   mean = 0.1969   95% CI = [0.1839, 0.2091]
-    γ           median = 0.2174   mean = 0.2174   95% CI = [0.2086, 0.2263]
-    ρ           median = 0.0282   mean = 0.028   95% CI = [0.0221, 0.0333]
-    R0          median = 1.0077   mean = 1.0077   95% CI = [0.9528, 1.062]
-    IP_steps    median = 5.12   mean = 5.12   95% CI = [4.94, 5.31]
-    K_over_N    median = 0.1951   mean = 0.195   95% CI = [0.1376, 0.2512]
+    N           median = 14144.0   mean = 14177.0   95% CI = [10359.0, 17727.0]
+    β           median = 0.19   mean = 0.1902   95% CI = [0.1795, 0.2027]
+    γ           median = 0.2172   mean = 0.2172   95% CI = [0.2083, 0.2261]
+    ρ           median = 0.0257   mean = 0.0259   95% CI = [0.0212, 0.0318]
+    R0          median = 0.9714   mean = 0.9745   95% CI = [0.9394, 1.028]
+    IP_steps    median = 5.12   mean = 5.12   95% CI = [4.94, 5.32]
+    K_over_N    median = 0.1609   mean = 0.164   95% CI = [0.1284, 0.2197]
 
     90% credible intervals:
-    N           median = 11664.0   90% CI = [9390.0, 15631.0]
-    β           median = 0.197   90% CI = [0.1861, 0.2073]
-    γ           median = 0.2174   90% CI = [0.21, 0.2248]
-    ρ           median = 0.0282   90% CI = [0.0229, 0.0325]
-    R0          median = 1.008   90% CI = [0.96, 1.054]
-    IP_steps    median = 5.12   90% CI = [4.97, 5.28]
+    N           median = 14144.0   90% CI = [10898.0, 17453.0]
+    β           median = 0.19   90% CI = [0.1812, 0.2003]
+    γ           median = 0.2172   90% CI = [0.2097, 0.2247]
+    ρ           median = 0.0257   90% CI = [0.0217, 0.0309]
+    R0          median = 0.971   90% CI = [0.943, 1.017]
+    IP_steps    median = 5.12   90% CI = [4.97, 5.29]
 
     Convergence diagnostics:
 
@@ -446,20 +450,20 @@ posterior_table = (
       parameters         ess   ess_per_sec 
           Symbol     Float64       Float64 
 
-               β   3252.8227       95.9110
-               γ   3234.3286       95.3657
-               ρ   3538.8250      104.3439
-               N   3532.0687      104.1447
+               β   2974.6294       75.2899
+               γ   3313.9705       83.8789
+               ρ   3264.8749       82.6362
+               N   3223.7847       81.5962
 
     R-hat
 
       parameters      rhat 
           Symbol   Float64 
 
-               β    1.0012
-               γ    1.0005
-               ρ    1.0011
-               N    1.0008
+               β    1.0023
+               γ    1.0022
+               ρ    1.0012
+               N    1.0012
 
 Plot model fit
 
@@ -467,14 +471,14 @@ Plot model fit
 
 ![](dsa_WSU_Turing_files/figure-commonmark/cell-18-output-1.svg)
 
-    Final epidemic size (simulated, at median N): τ * N̂ = 2281.37
+    Final epidemic size (simulated, at median N): τ * N̂ = 2293.9
     Total observed infections: 2276
-    Inferred susceptible population (median): N̂ = 11664
+    Inferred susceptible population (median): N̂ = 14144
     Mean recovery time (observed delta, hosp - onset): 5.0 days
     Mean recovery delta (fitted, 1/p_γ̂): 5.12 days
     Observed total infections: 2276
-    Predicted total infections: 2281.4
-    Recovery delta fit error (observed vs 1/p_γ̂): 0.7%
+    Predicted total infections: 2293.9
+    Recovery delta fit error (observed vs 1/p_γ̂): 0.9%
 
 ## Comparison to KhudaBukhsh et al. (2019) results
 
@@ -486,9 +490,9 @@ KhudaBukhsh et al. (2019).
 
 ![](dsa_WSU_Turing_files/figure-commonmark/cell-21-output-1.svg)
 
-    Final size posterior: 
+    Final size, posterior predictive replicates Binomial(N, τ) (observed K = 2276): 
     median = 2276.0   
-    95% CI = [2194.0, 2360.0]
+    95% interval = [2156.0, 2397.0]
 
 ## Manuscript figure export
 
@@ -505,18 +509,21 @@ Figure 1
 ## Discussion
 
 The analysis performed on the WSU H1N1 outbreak dataset from 2009 showed
-that the discrete SIR model, with geometric recovery times, captured the
-dynamics of the epidemic. The susceptible population $N$ has a posterior
-median of $11{,}664$ (95% CI $[9{,}027,\,16{,}295]$), larger than the
-estimate of $7{,}051$ (90% CI $[6{,}602,\,7{,}581]$) reported by
-KhudaBukhsh et al. (2020). The two analyses treat $N$ differently: here
-it enters through the Binomial final-size term and is summed out over a
-uniform prior, whereas KhudaBukhsh et al. impute it at each iteration as
+that the discrete SIR model, with geometric recovery times, follows the
+overall decline of incidence but not the two early peaks (days 10 and
+17). The population at risk $N$ has a posterior median of $14{,}144$
+(95% CI $[10{,}359,\,17{,}727]$), larger than the estimate of $7{,}051$
+(90% CI $[6{,}602,\,7{,}581]$) reported by KhudaBukhsh et al. (2020).
+The two analyses treat $N$ differently: here it enters through the
+Binomial final-size term and is summed out over a uniform prior, whereas
+KhudaBukhsh et al. impute it at each iteration as
 $n \sim \mathrm{NegBinom}(k, \tau)$ from the final-size equation and fix
-$\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.197$) and
-reproduction number ($R_0 = 1.01$, 95% CI $[0.96,\,1.06]$) are close to
-theirs ($0.189$ and $1.06$), and the fitted mean infectious period
-($5.12$ days) reproduces the mean recorded recovery interval.
+$\gamma^{-1} = 5.5$ days. The transmission rate ($\beta = 0.190$) agrees
+with theirs ($0.189$). The reproduction number ($R_0 = 0.97$, 95% CI
+$[0.94,\,1.03]$) is slightly lower than theirs ($1.06$), which is
+consistent with the larger $N$, since it implies a smaller attack rate.
+Both estimates of $R_0$ lie close to 1. The fitted mean infectious
+period ($5.12$ days) reproduces the mean recorded recovery interval.
 
 This approach offers several advantages: a simple and interpretable
 modelling framework, fast computation and inference through Turing.jl,

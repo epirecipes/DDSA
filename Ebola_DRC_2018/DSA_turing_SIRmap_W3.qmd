@@ -10,7 +10,9 @@ format:
         code-overflow: wrap
     gfm: default
 execute:
-    cache: true
+    # No cache: Quarto's cache key ignores the data files, the shared modules and (for W3) the Wave 1–2 curve
+    # files read by the manuscript-figure cell, so a cached render could keep a stale figure. A render takes about a minute.
+    cache: false
 engine: julia
 julia:
     exeflags: ["--project=@."]
@@ -190,8 +192,10 @@ K_total = nrow(df_all)
 
 # Use all records with a known onset time: complete + onset_only
 onset_times_all = vcat(df_complete.onset, df_onset_only.onset)
-nsteps = Int(ceil(maximum(onset_times_all))) + 1
-ti_onset = max.(1, min.(Int.(round.(onset_times_all)) .+ 1, nsteps))
+# Calendar-day bins: step k holds the times in [k − 1, k), i.e. day k − 1 (day 0 is step 1). The grid ends on
+# the day of the last onset.
+nsteps = Int(floor(maximum(onset_times_all))) + 1
+ti_onset = max.(1, min.(Int.(floor.(onset_times_all)) .+ 1, nsteps))
 K_onset  = length(ti_onset)   # used in Multinomial
 th_onset = time_counts(ti_onset, nsteps)
 
@@ -202,7 +206,7 @@ same_day_complete = count(<(1), raw_delta_complete)
 delta_complete = max.(1, Int.(round.(raw_delta_complete)))
 
 # The "onset" column for e1=0 records contains the hospitalisation time.
-T_hosp_only = max.(1, min.(Int.(round.(df_hosp_only.hosp)) .+ 1, nsteps))
+T_hosp_only = max.(1, min.(Int.(floor.(df_hosp_only.hosp)) .+ 1, nsteps))
 
 # Minimum N: at least as many susceptibles as total observed infections
 N_min = K_total
@@ -408,7 +412,7 @@ We can also plot posterior distributions for each parameter.
 ρ_med = median(chain[:ρ])
 N_med = median(chain[:N])
 
-# Vossler et al. (2022) Wave 1 reference values
+# Vossler et al. (2022) Wave 3 reference values
 p1 = histogram(chain[:β], label="", title="β", density=true)
 vline!(p1, [0.235], label="Ref (Vossler et al.)", color=:black, linestyle=:dash, linewidth=2)
 vline!(p1, [β_med], label="Posterior median", color=:red, linestyle=:dash, linewidth=2)

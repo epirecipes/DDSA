@@ -130,6 +130,19 @@ function mean_ip_density_xlims(vectors...; qlo=0.03, qhi=0.97, pad_frac=0.06)
     return (max(0.0, lo - pad), hi + pad)
 end
 
+"""
+Kernel density of posterior draws `x`, evaluated on a fine grid over `window`, added to plot `p`. StatsPlots'
+`density` uses 200 grid points over the full range of the draws, which over-smooths a posterior with rare very
+large draws (e.g. 1/p for a geometric fit under a Beta(1, 1) prior on p). Draws outside the window keep their
+weight, so the curve is not renormalised.
+"""
+function wdensity!(p, x; window, kwargs...)
+    v = vec(x)
+    kd = StatsPlots.KernelDensity.kde(v; boundary = window, npoints = 2048,
+                                      bandwidth = StatsPlots.KernelDensity.default_bandwidth(v))
+    plot!(p, kd.x, kd.density; kwargs...)
+end
+
 """Convert a rate to a proportion over a unit time interval."""
 @inline function rate_to_proportion(r, t=1.0)
     if r < 0 || isnan(r)
@@ -938,7 +951,7 @@ density!(p_beta, vec(chain_Abc[:β]), label="A: Full (Boxcar)",
           color=:green4, linewidth=2.5, alpha=0.75)
 density!(p_beta, β_Bbc_draws, label="B: Infection-only (Boxcar)",
           color=:green4, linewidth=2.5, linestyle=:dash, alpha=0.75)
-vline!(p_beta, [β_true], color=:black, linestyle=:dot, linewidth=2.5,
+vline!(p_beta, [β_true], color=:black, linewidth=1.0,
         label="Simulator β (per Δt)")
 plot(p_beta, size=(800, 420), left_margin=4Plots.mm, bottom_margin=4Plots.mm)
 ```
@@ -952,7 +965,7 @@ Figure 2 compares the marginal posterior for mean infectious period across scena
 #| output: true
 #| label: fig-meanip-scenarios
 
-# Zoom x: geometric models can have very long right tails (1/nb_p). To avoid flattening all curves, we set x-limits using the non-geometric models, then overlay geometric densities on the same axis.
+# Zoom x: geometric models can have long right tails (1/nb_p). The x-limits come from the pooled central 94% of all curves, including the geometric fits (geometric B lies at 2–6 d).
 ip_Av   = mean_ip_nb(chain_A)
 ip_Cv   = mean_ip_nb(chain_C)
 ip_Abcv = mean_ip_nb(chain_Abc)
@@ -960,27 +973,28 @@ ip_geoA = 1 ./ vec(chain_Ageo[:nb_p])
 ip_geoB = 1 ./ vec(chain_Bgeo[:nb_p])
 ip_geoC = 1 ./ vec(chain_Cgeo[:nb_p])
 x_ip_lo, x_ip_hi = mean_ip_density_xlims(
-    ip_Av, mean_ip_B_draws, ip_Cv, ip_Abcv, mean_ip_Bbc_draws)
+    ip_Av, mean_ip_B_draws, ip_Cv, ip_Abcv, mean_ip_Bbc_draws, ip_geoA, ip_geoB, ip_geoC)
 
-p_ip = density(ip_Av, label="A: Full (DPH)",
-                color=:royalblue, linewidth=2.5,
-                xlabel="Mean infectious period (days)", ylabel="Posterior density",
-                title="Posterior mean infectious period (x zoom: pooled 3–97% across curves)", legend=:topleft)
-density!(p_ip, mean_ip_B_draws, label="B: Infection-only (DPH)",
+w_ip = (max(0.0, x_ip_lo - 1), x_ip_hi + 1)   # density window, slightly wider than the axis
+p_ip = plot(xlabel="Mean infectious period (days)", ylabel="Posterior density",
+            title="Posterior mean infectious period (x zoom: pooled 3–97% across curves)", legend=:topleft)
+wdensity!(p_ip, ip_Av; window=w_ip, label="A: Full (DPH)",
+                color=:royalblue, linewidth=2.5)
+wdensity!(p_ip, mean_ip_B_draws; window=w_ip, label="B: Infection-only (DPH)",
           color=:royalblue, linewidth=2.5, linestyle=:dash)
-density!(p_ip, ip_Cv, label="C: Recovery-only (DPH)",
-          color=:slateblue3, linewidth=2.5, linestyle=:dashdotdot)
-density!(p_ip, ip_geoA, label="A: Full (Geometric)",
+wdensity!(p_ip, ip_Cv; window=w_ip, label="C: Recovery-only (DPH)",
+          color=:royalblue, linewidth=2.5, linestyle=:dot)
+wdensity!(p_ip, ip_geoA; window=w_ip, label="A: Full (Geometric)",
           color=:red3, linewidth=2.5, alpha=0.75)
-density!(p_ip, ip_geoB, label="B: Geometric (r≡1)",
+wdensity!(p_ip, ip_geoB; window=w_ip, label="B: Geometric (r≡1)",
           color=:red3, linewidth=2.5, linestyle=:dash, alpha=0.75)
-density!(p_ip, ip_geoC, label="C: Recovery-only (Geometric)",
-          color=:red3, linewidth=2.5, linestyle=:dashdotdot, alpha=0.75)
-density!(p_ip, ip_Abcv, label="A: Full (Boxcar)",
+wdensity!(p_ip, ip_geoC; window=w_ip, label="C: Recovery-only (Geometric)",
+          color=:red3, linewidth=2.5, linestyle=:dot, alpha=0.75)
+wdensity!(p_ip, ip_Abcv; window=w_ip, label="A: Full (Boxcar)",
           color=:green4, linewidth=2.5, alpha=0.75)
-density!(p_ip, mean_ip_Bbc_draws, label="B: Infection-only (Boxcar)",
+wdensity!(p_ip, mean_ip_Bbc_draws; window=w_ip, label="B: Infection-only (Boxcar)",
           color=:green4, linewidth=2.5, linestyle=:dash, alpha=0.75)
-vline!(p_ip, [nb_mean], color=:black, linestyle=:dot, linewidth=2.5,
+vline!(p_ip, [nb_mean], color=:black, linewidth=1.0,
         label="Simulator E[infectious period]")
 plot(p_ip; xlims=(x_ip_lo, x_ip_hi), size=(900, 480), left_margin=4Plots.mm, bottom_margin=4Plots.mm)
 ```
@@ -1042,7 +1056,7 @@ default(guidefontsize  = 9,
 # Two panels: β posteriors; implied mean IP (r/p). (Dedicated `nb_r` bar figure is above.)
 
 r1 = density(vec(chain_A[:β]), label="A-Full (DPH)", color=:royalblue, linewidth=2.5,
-              xlabel="β (per Δt)", ylabel="Posterior density", title="(A) β (per Δt)")
+              xlabel="β (per Δt)", ylabel="Posterior density", title="β (per Δt)")
 density!(r1, β_B_draws, label="B-InfOnly (DPH)", color=:royalblue,
           linewidth=2.5, linestyle=:dash)
 density!(r1, vec(chain_Ageo[:β]), label="A-Full (Geo)", color=:red3,
@@ -1053,34 +1067,35 @@ density!(r1, vec(chain_Abc[:β]), label="A-Full (Boxcar)", color=:green4,
           linewidth=2.5, alpha=0.7)
 density!(r1, β_Bbc_draws, label="B-InfOnly (Boxcar)", color=:green4,
           linewidth=2.5, linestyle=:dash, alpha=0.7)
-vline!(r1, [β_true], color=:black, linestyle=:dot, linewidth=2.5, label="Simulator β (per Δt)")
+vline!(r1, [β_true], color=:black, linewidth=1.0, label="Simulator β (per Δt)")
 
 # Geometric A/B: r≡1 ⇒ mean IP = 1/nb_p (same scale as r/p for NegBin-DPH).
 ip_sum_geoA = 1 ./ vec(chain_Ageo[:nb_p])
 ip_sum_geoB = 1 ./ vec(chain_Bgeo[:nb_p])
 ip_sum_geoC = 1 ./ vec(chain_Cgeo[:nb_p])
-# X zoom matches fig-meanip-scenarios (exclude Geo tails for axis selection).
+# X range from the central 94% of all the curves drawn, including the geometric fits (geometric B lies at 2–6 d).
 x_r2_lo, x_r2_hi = mean_ip_density_xlims(
     mean_ip_nb(chain_A), mean_ip_B_draws, mean_ip_nb(chain_C),
-    mean_ip_nb(chain_Abc), mean_ip_Bbc_draws)
-r2 = density(mean_ip_nb(chain_A), label="A-Full (DPH)", color=:royalblue, linewidth=2.5,
-              xlabel="Mean infectious period (days)", ylabel="Posterior density",
-              title="(B) E[infectious period] (days); x zoomed", legend=:topleft)
-density!(r2, mean_ip_B_draws, label="B-InfOnly (DPH)", color=:royalblue,
+    mean_ip_nb(chain_Abc), mean_ip_Bbc_draws, ip_sum_geoA, ip_sum_geoB, ip_sum_geoC)
+w_r2 = (max(0.0, x_r2_lo - 1), x_r2_hi + 1)   # density window, slightly wider than the axis
+r2 = plot(xlabel="Mean infectious period (days)", ylabel="Posterior density",
+          title="Mean infectious period (days)", legend=:topleft)
+wdensity!(r2, mean_ip_nb(chain_A); window=w_r2, label="A-Full (DPH)", color=:royalblue, linewidth=2.5)
+wdensity!(r2, mean_ip_B_draws; window=w_r2, label="B-InfOnly (DPH)", color=:royalblue,
           linewidth=2.5, linestyle=:dash)
-density!(r2, ip_sum_geoA, label="A-Full (Geo)", color=:red3,
+wdensity!(r2, ip_sum_geoA; window=w_r2, label="A-Full (Geo)", color=:red3,
           linewidth=2.5, alpha=0.7)
-density!(r2, ip_sum_geoB, label="B-InfOnly (Geo)", color=:red3,
+wdensity!(r2, ip_sum_geoB; window=w_r2, label="B-InfOnly (Geo)", color=:red3,
           linewidth=2.5, linestyle=:dash, alpha=0.7)
-density!(r2, ip_sum_geoC, label="C-RecOnly (Geo)", color=:red3,
-          linewidth=2.5, linestyle=:dashdotdot, alpha=0.7)
-density!(r2, mean_ip_nb(chain_C), label="C-RecOnly (DPH)", color=:slateblue3,
-          linewidth=2.5, linestyle=:dashdotdot)
-density!(r2, mean_ip_nb(chain_Abc), label="A-Full (Boxcar)", color=:green4,
+wdensity!(r2, ip_sum_geoC; window=w_r2, label="C-RecOnly (Geo)", color=:red3,
+          linewidth=2.5, linestyle=:dot, alpha=0.7)
+wdensity!(r2, mean_ip_nb(chain_C); window=w_r2, label="C-RecOnly (DPH)", color=:royalblue,
+          linewidth=2.5, linestyle=:dot)
+wdensity!(r2, mean_ip_nb(chain_Abc); window=w_r2, label="A-Full (Boxcar)", color=:green4,
           linewidth=2.5, alpha=0.7)
-density!(r2, mean_ip_Bbc_draws, label="B-InfOnly (Boxcar)", color=:green4,
+wdensity!(r2, mean_ip_Bbc_draws; window=w_r2, label="B-InfOnly (Boxcar)", color=:green4,
           linewidth=2.5, linestyle=:dash, alpha=0.7)
-vline!(r2, [nb_mean], color=:black, linestyle=:dot, linewidth=2.5, label="Simulator E[IP]")
+vline!(r2, [nb_mean], color=:black, linewidth=1.0, label="Simulator E[IP]")
 plot!(r2, xlims=(x_r2_lo, x_r2_hi))
 
 fig_summary = plot(r1, r2;
@@ -1104,7 +1119,7 @@ fig_summary
 
 ## Posterior predictive checks
 
-Figure 5 shows posterior predictive checks: incidence curves for Scenarios A and B, and recovery-interval histograms for Scenario C. For each posterior draw, we run the discrete epidemic forward map to obtain a predicted infection-time distribution, simulate new case counts, and overlay the posterior mean and 95% predictive interval on the observed histogram. For Scenario C, we evaluate the predicted recovery-interval distribution under inferred phase-type parameters and compare it directly with observed individual durations. Boxcar posterior predictives use the same infection-age state dimension as the corresponding fitted model to keep inference and prediction aligned.
+Figure 5 shows posterior predictive checks: incidence curves for Scenarios A and B, and recovery-interval histograms for Scenario C. For each posterior draw, we run the discrete epidemic forward map to obtain the expected daily number of new infections, and overlay the posterior median and 95% credible band of these expected counts on the observed histogram (parameter uncertainty only, as in the other case studies). For Scenario C, we evaluate the predicted recovery-interval distribution under inferred phase-type parameters and compare it directly with observed individual durations. Boxcar posterior predictives use the same infection-age state dimension as the corresponding fitted model to keep inference and prediction aligned.
 
 ```{julia}
 #| echo: false
@@ -1174,10 +1189,12 @@ function posterior_predictive_check_boxcar(chain, N, nsteps, K_age_classes; n_po
 end
 
 function fit_panel(means, draws, title_str; color=:royalblue)
+    # Median and 95% band of the expected counts (parameter uncertainty only, as in the other figures);
+    # `draws` (simulated counts, with sampling noise) is not used for the band.
     tt   = 1:nsteps
     pmd  = vec(mapslices(x -> quantile(x, 0.5), means, dims=1))
-    plo  = vec(mapslices(x -> quantile(x, 0.025), draws, dims=1))
-    phi  = vec(mapslices(x -> quantile(x, 0.975), draws, dims=1))
+    plo  = vec(mapslices(x -> quantile(x, 0.025), means, dims=1))
+    phi  = vec(mapslices(x -> quantile(x, 0.975), means, dims=1))
     p = bar(tt, th_obs;
             label     = "Observed",
             color     = :lightgray,
@@ -1203,7 +1220,7 @@ observed histogram.
 function posterior_predictive_recovery(chain, delta_obs; n_post=400, nb_r_default::Int=1)
     n_chain  = size(chain, 1)
     idx      = round.(Int, range(1, n_chain, length=min(n_post, n_chain)))
-    d_min    = minimum(delta_obs)
+    d_min    = 1   # from 1 day, so that predicted mass below the shortest observed interval is shown
     d_max    = maximum(delta_obs) + 5
     bins     = d_min:d_max
     n_obs    = length(delta_obs)

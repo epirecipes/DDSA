@@ -143,6 +143,19 @@ function mean_ip_density_xlims(vectors...; qlo=0.03, qhi=0.97, pad_frac=0.06)
     return (max(0.0, lo - pad), hi + pad)
 end
 
+"""
+Kernel density of posterior draws `x`, evaluated on a fine grid over `window`, added to plot `p`. StatsPlots'
+`density` uses 200 grid points over the full range of the draws, which over-smooths a posterior with rare very
+large draws (e.g. 1/p for a geometric fit under a Beta(1, 1) prior on p). Draws outside the window keep their
+weight, so the curve is not renormalised.
+"""
+function wdensity!(p, x; window, kwargs...)
+    v = vec(x)
+    kd = StatsPlots.KernelDensity.kde(v; boundary = window, npoints = 2048,
+                                      bandwidth = StatsPlots.KernelDensity.default_bandwidth(v))
+    plot!(p, kd.x, kd.density; kwargs...)
+end
+
 """Convert a rate to a proportion over a unit time interval."""
 @inline function rate_to_proportion(r, t=1.0)
     if r < 0 || isnan(r)
@@ -764,7 +777,7 @@ _ = sample(model_A, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_A = @elapsed chain_A = sample_summing_r(model_A)
 ```
 
-    Scenario A (Full DPH): 7.9 s
+    Scenario A (Full DPH): 7.6 s
 
 ## Scenario B — Infection-only DDSA (DPH)
 
@@ -798,7 +811,7 @@ _ = sample(model_C, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_C = @elapsed chain_C = sample_summing_r(model_C)
 ```
 
-    Scenario C (Recovery-only DPH): 1.4 s
+    Scenario C (Recovery-only DPH): 1.5 s
     Scenario C: inferred nb_r = 4  (Erlang k = 4)
 
 ## Scenario C — Recovery times only (Geometric)
@@ -826,7 +839,7 @@ _ = sample(model_Ageo, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains
 t_Ageo = @elapsed chain_Ageo = sample_std(model_Ageo)
 ```
 
-    Scenario A (Full Geometric): 3.2 s
+    Scenario A (Full Geometric): 2.0 s
 
 ## Scenario B — Geometric baseline ($r \equiv 1$)
 
@@ -841,7 +854,7 @@ _ = sample(model_Bgeo, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains
 t_Bgeo = @elapsed chain_Bgeo = sample_std(model_Bgeo)
 ```
 
-    Scenario B (Geometric, r≡1, infection-only): 2.2 s
+    Scenario B (Geometric, r≡1, infection-only): 1.9 s
 
 ## Scenario A — Full (Boxcar)
 
@@ -856,7 +869,7 @@ _ = sample(model_Abc, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_Abc = @elapsed chain_Abc = sample_summing_r(model_Abc)
 ```
 
-    Scenario A (Full Boxcar): 7.0 s
+    Scenario A (Full Boxcar): 6.8 s
 
 ## Scenario B — Infection-only (Boxcar)
 
@@ -871,7 +884,7 @@ t_Bbc = @elapsed chain_Bbc = sample_summing_r(model_Bbc; n_draws = n_samples_B)
 chain_Bbc = add_draws(chain_Bbc, :nb_p, Array(chain_Bbc[:nb_r]) ./ Array(chain_Bbc[:mean_ip]))
 ```
 
-    Scenario B (Boxcar, infection-only, summed over r): 221.5 s
+    Scenario B (Boxcar, infection-only, summed over r): 214.0 s
 
 # Results
 
@@ -1005,13 +1018,14 @@ Figure 4
 Figure 5 shows posterior predictive checks: incidence curves for
 Scenarios A and B, and recovery-interval histograms for Scenario C. For
 each posterior draw, we run the discrete epidemic forward map to obtain
-a predicted infection-time distribution, simulate new case counts, and
-overlay the posterior mean and 95% predictive interval on the observed
-histogram. For Scenario C, we evaluate the predicted recovery-interval
-distribution under inferred phase-type parameters and compare it
-directly with observed individual durations. Boxcar posterior
-predictives use the same infection-age state dimension as the
-corresponding fitted model to keep inference and prediction aligned.
+the expected daily number of new infections, and overlay the posterior
+median and 95% credible band of these expected counts on the observed
+histogram (parameter uncertainty only, as in the other case studies).
+For Scenario C, we evaluate the predicted recovery-interval distribution
+under inferred phase-type parameters and compare it directly with
+observed individual durations. Boxcar posterior predictives use the same
+infection-age state dimension as the corresponding fitted model to keep
+inference and prediction aligned.
 
     Saved -> ../figures/fig_data_avail_ppc.pdf
 
