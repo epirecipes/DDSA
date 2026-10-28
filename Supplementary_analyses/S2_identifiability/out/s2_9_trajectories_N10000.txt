@@ -1,0 +1,11 @@
+== N=10000 (whole population, incl. ρN=1.0 initial infectives): K=9509 (K/N=0.951), T=65 d, 9510 recovery intervals (mean 6.33 d, min 4); ρ estimated, ρ ~ Beta(1, N − 1)
+   truth: R0=3.164, mean IP E[W]=6.328 d, ρ=0.0001; expected incidence peak 914.6 on step 25; number infectious peak 4928.0 on step 27
+   realised: observed incidence peak 917 on step 26; line-list number infectious peak 4971 on step 27
+  Map–Poisson: R0=3.29 [2.96, 3.89] | meanIP=6.64 [5.64, 8.24] d | ρN=1.0 [0.77, 1.24] | P(r)=[0.0, 0.0, 0.12, 0.67, 0.19, 0.02, 0.0, 0.0, 0.0, 0.0] | 4000 independent draws from the numerical grid posterior (s2_8_grid_poisson.jl)
+      1000 draws for the bands: expected incidence peak 923.31 [897.59, 949.32] on step 25.0 [25.0, 25.0] | number infectious peak 5156.24 [4429.06, 6103.86] | expected cases Στ·N 9569.89 [9389.72, 9768.72]
+  ODE–Poisson: R0=3.27 [2.93, 3.96] | meanIP=8.01 [7.04, 9.99] d | ρN=0.7 [0.58, 0.85] | recorded mean interval=8.01 [7.04, 9.99] d | P(r)=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.01, 0.02, 0.02, 0.02, 0.02, 0.03, 0.02, 0.03, 0.04, 0.04, 0.05, 0.05, 0.05, 0.05, 0.06, 0.06, 0.06, 0.07, 0.06, 0.07, 0.07, 0.07] | 4000 independent draws from the numerical grid posterior (s2_8_grid_poisson.jl)
+      1000 draws for the bands: expected incidence peak 911.06 [886.17, 938.35] on step 25.0 [25.0, 25.0] | number infectious peak 6040.52 [5386.52, 7112.88] | expected cases Στ·N 9560.98 [9352.85, 9797.02]
+  Infection-only DDSA: R0=3.17 [3.1, 3.25] | meanIP=6.34 [5.94, 6.66] d | ρN=0.97 [0.76, 1.17] | P(r)=[0.0, 0.0, 0.14, 0.74, 0.11, 0.01, 0.0, 0.0, 0.0, 0.0] | 4000 independent draws from the numerical grid posterior (s2_8_grid_poisson.jl)
+      1000 draws for the bands: expected incidence peak 917.14 [900.52, 934.03] on step 25.0 [25.0, 25.0] | number infectious peak 4942.08 [4599.05, 5234.99] | expected cases Στ·N 9510.9 [9468.19, 9551.75]
+  Full-data DDSA: R0=3.17 [3.13, 3.21] | meanIP=6.33 [6.29, 6.37] d | ρN=0.97 [0.86, 1.09] | P(r)=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | R̂≤1.001 ESS≥4735 div=0 (by chain [0, 0, 0, 0]) | chains loaded
+      1000 draws for the bands: expected incidence peak 916.99 [900.9, 933.54] on step 25.0 [25.0, 25.0] | number infectious peak 4936.08 [4864.52, 5007.9] | expected cases Στ·N 9508.98 [9485.0, 9532.45]

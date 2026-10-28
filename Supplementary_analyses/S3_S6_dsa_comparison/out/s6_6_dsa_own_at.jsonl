@@ -1,0 +1,10 @@
+{"seed": 1, "grid": 800, "llI_python_at_python": -29862.26637154823, "llI_python_at_ours": -29871.606509280104, "llI_ours_at_ours": -29862.927588768896}
+{"seed": 1, "grid": 10000, "llI_python_at_python": -29871.1890405717, "llI_python_at_ours": -29862.922508642867, "llI_ours_at_ours": -29862.927588768896}
+{"seed": 2, "grid": 800, "llI_python_at_python": -30216.543551495128, "llI_python_at_ours": -30222.24790914441, "llI_ours_at_ours": -30216.52923913634}
+{"seed": 2, "grid": 10000, "llI_python_at_python": -30223.18096027741, "llI_python_at_ours": -30216.49127049762, "llI_ours_at_ours": -30216.52923913634}
+{"seed": 3, "grid": 800, "llI_python_at_python": -30270.283549505795, "llI_python_at_ours": -30288.553169657756, "llI_ours_at_ours": -30270.960517857464}
+{"seed": 3, "grid": 10000, "llI_python_at_python": -30282.634059492426, "llI_python_at_ours": -30271.011001558632, "llI_ours_at_ours": -30270.960517857464}
+{"seed": 4, "grid": 800, "llI_python_at_python": -30171.278073011916, "llI_python_at_ours": -30182.89717576798, "llI_ours_at_ours": -30172.04503663481}
+{"seed": 4, "grid": 10000, "llI_python_at_python": -30181.001617811187, "llI_python_at_ours": -30172.035858278494, "llI_ours_at_ours": -30172.04503663481}
+{"seed": 5, "grid": 800, "llI_python_at_python": -30093.645590135184, "llI_python_at_ours": -30103.33457720194, "llI_ours_at_ours": -30093.764022909174}
+{"seed": 5, "grid": 10000, "llI_python_at_python": -30099.557032219942, "llI_python_at_ours": -30093.768432333614, "llI_ours_at_ours": -30093.764022909174}

@@ -1,0 +1,23 @@
+N-sum table 8001 τ × 80 ρ in 2.6 s; max |interp − exact| over 3000 random (τ, ρ) = 2.3e-5 log-units
+Seed prior: fraction scale, ρ ~ Beta(1, 98); N ~ U(91, 20090) summed out
+Grid 10×232×180×80 (r, μ step 0.125, R0 step 0.025, ρ ∈ [1e-6, 0.3] 80 log points) in 64 s; max |grid ll − exact ll_I0| over 2000 random cells = 2.4e-5
+Posterior mass with τ < 0.5 (large-N / small-attack region): 2.0622704740498062e-5
+Posterior mass with R0 < 1 (sub-critical; mode B of the NUTS fit lies here): 3.1963786458035345e-14
+   within τ < 0.5: R0 median 1.362, mean IP median 1.062
+Max log posterior density: τ ≥ 0.5 region -46.02; τ < 0.5 region -48.37
+At mode B of the NUTS fit (R0≈0.52, μ≈13.9, ρ≈0.0094): max over r of log posterior = -73.73 (global max -46.02)
+Local maxima of the r-summed log density (value, μ, R0, ρ), top 10:
+   (-44.28, 10.94, 4.988, 0.0105)
+   (-44.29, 10.81, 4.938, 0.0105)
+   (-44.29, 10.69, 4.888, 0.0105)
+   (-44.3, 10.56, 4.812, 0.0105)
+   (-44.3, 10.44, 4.762, 0.0105)
+   (-44.3, 10.31, 4.712, 0.0105)
+   (-44.3, 10.19, 4.662, 0.0105)
+   (-44.31, 10.06, 4.612, 0.0105)
+   (-44.33, 10.56, 4.988, 0.00895)
+   (-44.33, 10.44, 4.938, 0.00895)
+Grid posterior: R0 = 4.188 [2.238, 4.962] | meanIP = 8.938 [3.438, 12.188] | ρ = 0.01 [0.004, 0.023] | τ = 0.971 [0.846, 0.985]
+   N = 94.0 [91.0, 109.0]  P(N ≤ 99) = 0.903 | I0 = 0.97 [0.37, 2.22]
+   P(r) = [0.028, 0.07, 0.108, 0.13, 0.142, 0.14, 0.133, 0.115, 0.084, 0.051] | edge mass: R0 0.018, ρ 4.5e-26
+Reference, map–Poisson (Poisson counts, N = 99): R0 4.15 [2.42, 4.97], meanIP 8.84 [4.05, 12.23]
