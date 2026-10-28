@@ -2,7 +2,8 @@
 #  (1) the type-stable map and grouped likelihood equal the notebook's simulate_discrete_glct / dph_full_loglik;
 #  (2) the chain-binomial simulator's mean final size and incidence match the deterministic map at large N;
 #  (3) Gillespie final sizes against the continuous final-size relation;
-#  (4) timing of single fits (to plan the full study).
+#  (4) timing of single fits (to plan the full study);
+#  (5) the working-model generator (sim_working_model) against the likelihood it is drawn from.
 include(joinpath(@__DIR__, "sim_core.jl"))
 const OUT = open(joinpath(OUTDIR, "sim_check.txt"), "w")
 say(x) = (println(x); println(OUT, x); flush(OUT))
@@ -72,6 +73,18 @@ for (R0, r) in ((2.0, 4), (1.3, 1))
     maj = filter(s -> s.K >= 0.1N, sims)
     z = 0.5; for _ in 1:200; z = 1 - exp(-R0 * z); end
     say("(3) Gillespie N=10,000 R0=$R0 r=$r: major share $(round(length(maj)/60, digits=2)); mean K/N $(round(mean(s.K for s in maj)/N, digits=4)) vs continuous final size $(round(z, digits=4)); mean δ $(round(mean(mean(linelist(s, N).delta) for s in maj[1:min(10,end)]), digits=3))")
+end
+# ---- (5) working-model generator: its K, days and intervals follow the likelihood's own Binomial, Multinomial and DPH
+for (N, R0) in ((100, 1.3), (1000, 2.0), (10_000, 3.0))
+    r = 4; β = R0 / WBAR; g = r / WBAR; ρ = M_SEED / (N + M_SEED)
+    dph = PhaseTypeDistributions.dph_negative_binomial(r, g)
+    sims = [sim_working_model(Xoshiro(300 + i), N, R0, r) for i in 1:2000]
+    T = sims[1].T; lf, lt, _ = glct_log(dph.S, dph.α, β, ρ, T); f = exp.(lf)
+    d = linelist(sims[1], N)
+    ref = logpdf(Binomial(N, exp(lt)), d.K) + logpdf(Multinomial(d.K, f ./ sum(f)), d.th) + sum(logpdf(dph, x) for x in d.delta)
+    mday = mean(mean(s.infday) for s in sims); δs = reduce(vcat, [linelist(s, N).delta for s in sims[1:50]])
+    say(@sprintf("(5) working model N=%d R0=%.1f: T=%d; mean K/N %.4f vs τ %.4f; mean infection day %.3f vs Σ k f_k %.3f; mean δ %.3f vs W̄ %.3f; |full_loglik − Binomial+Multinomial+DPH logpdf| at the truth = %.1e",
+        N, R0, T, mean(s.K for s in sims) / N, exp(lt), mday, sum((1:T) .* f), mean(δs), WBAR, abs(full_loglik(r, β, ρ, g, d) - ref)))
 end
 # ---- (4) timing of single fits (4 chains × 1000 + 1000 warm-up, serial chains, one fit per thread)
 get(ENV, "TIMING", "0") == "1" || (close(OUT); exit())

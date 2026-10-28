@@ -89,6 +89,26 @@ function sim_gillespie(rng, N, R0, r; μ = WBAR, M = M_SEED)
     return (infday = infday, recday = recday, K = length(infday), T = maximum(vcat(recday, seedδ)), seed_delta = seedδ)
 end
 
+"""Outbreak drawn from the DDSA working model, the distribution that the full-data likelihood describes, in which cases
+are independent given the parameters: the number of cases K ~ Binomial(N, τ), with τ from the deterministic GLCT map;
+infection days drawn independently from the map's normalised incidence f; and every recovery interval (cases and the
+seed) drawn independently from the NegBin DPH, W = r + NegBin(r, g). The observation window T is the first step after
+which the map expects fewer than 0.01 further infections, so the likelihood evaluated on these data (nsteps = T) uses
+exactly the τ and f of the generator. Same parameters and return value as sim_chainbinomial."""
+function sim_working_model(rng, N, R0, r; W̄ = WBAR, M = M_SEED, Tmax = 5000)
+    β = R0 / W̄; g = r / W̄; ρ = M / (N + M)
+    dph = PhaseTypeDistributions.dph_negative_binomial(r, g)
+    logf, logτ, _ = glct_log(dph.S, dph.α, β, ρ, Tmax)
+    left = N * exp(logτ) .* (1 .- cumsum(exp.(logf)))                # expected infections after each step
+    T = something(findfirst(<(0.01), left), Tmax)
+    logf, logτ, _ = glct_log(dph.S, dph.α, β, ρ, T)
+    K = rand(rng, Binomial(N, exp(logτ)))
+    infday = sort(rand(rng, Categorical(exp.(logf) ./ sum(exp.(logf))), K))
+    W() = r + rand(rng, NegativeBinomial(r, g))
+    recday = infday .+ [W() for _ in 1:K]
+    return (infday = infday, recday = recday, K = K, T = T, seed_delta = [W() for _ in 1:M])
+end
+
 """Line-list summaries used by the likelihood."""
 function linelist(sim, N)
     T = sim.T

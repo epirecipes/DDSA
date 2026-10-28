@@ -1,0 +1,12 @@
+== infection-only DDSA, numerical grid posterior, N=1000 (whole population), K=948, T=55 d (2026-10-23T15:43:35.632)
+   truth: R0=3.164, mean IP E[W]=6.328 d, ρN=1.0; priors R0 ~ U(0.5, 20.0), μ ~ U(1, 30), ρ ~ Beta(1, N − 1), r uniform on 1..10 with r < μ
+   check: 25 random points, max |Turing log-joint − grid log density| = 9.09e-13
+   grid: 620 μ × 10 r, windows 49 × 49 (±7 sd), 4400 finite (μ, r) cells, 407 s on 6 threads
+   diagnostics: max window edge share 2.8e-10 (mass-weighted mean 2.5e-10) | fallback windows 165 (posterior mass 3.0e-02) | windows with second-mode coarse cells 0 (posterior mass 0.0e+00)
+      fallback window μ=6.7875 r=3: mass 6.2e-03, R0 [2.78, 3.77], ρN [0.48, 4.2], edge share 1.8e-13
+      fallback window μ=5.5375 r=2: mass 6.0e-03, R0 [2.62, 3.52], ρN [0.32, 2.8], edge share 3.0e-13
+      fallback window μ=6.8625 r=4: mass 4.4e-03, R0 [2.73, 3.67], ρN [0.48, 4.2], edge share 7.1e-13
+   posterior: R0 = 3.15 [2.93, 3.42] | meanIP = 6.44 [4.91, 7.74] d | ρN = 1.35 [0.8, 2.15] | P(meanIP < 5) = 0.028 | P(meanIP > 20) = 0.0 | P(R0 > 10) = 0.0
+          P(r) = [0.031, 0.334, 0.321, 0.175, 0.082, 0.039, 0.016, 0.002, 0.0, 0.0]
+   draws (4000): R0 = 3.16 [2.92, 3.41] | meanIP = 6.44 [4.99, 7.71] d | ρN = 1.36 [0.79, 2.11] | expected cases Στ·N = 948.93 [933.33, 961.05] (observed K = 948)
+   s2_5 (same counts, R0 = 3.16 cell, global grid): R0 = 3.17 [2.93, 3.4] | meanIP = 6.44 [4.91, 7.74]

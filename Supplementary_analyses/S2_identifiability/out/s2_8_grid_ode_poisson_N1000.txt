@@ -1,0 +1,12 @@
+== ODE–Poisson, numerical grid posterior, N=1000 (whole population), K=948, T=55 d (2026-10-23T18:44:49.325)
+   truth: R0=3.164, mean IP E[W]=6.328 d, ρN=1.0; priors R0 ~ U(0.5, 20.0), μ ~ U(1, 30), ρ ~ Beta(1, N − 1), r uniform on 1..40 (Erlang stages, no constraint on μ)
+   check: 25 random points, max |Turing log-joint − grid log density| = 1.29e-08
+   grid: 620 μ × 40 r, windows 49 × 49 (±7 sd), 24800 finite (μ, r) cells, 6866 s on 10 threads
+   diagnostics: max window edge share 2.6e-01 (mass-weighted mean 1.7e-10) | fallback windows 885 (posterior mass 4.1e-02) | windows with second-mode coarse cells 27 (posterior mass 4.3e-151)
+      fallback window μ=27.1250 r=2: mass 3.8e-04, R0 [8.47, 12.23], ρN [0.32, 5.1], edge share 5.0e-12
+      fallback window μ=26.3750 r=2: mass 3.6e-04, R0 [8.27, 11.93], ρN [0.32, 5.1], edge share 5.4e-12
+      fallback window μ=26.1250 r=2: mass 3.6e-04, R0 [8.17, 11.83], ρN [0.32, 5.1], edge share 3.0e-12
+   posterior: R0 = 5.12 [2.75, 10.6] | meanIP = 14.04 [6.71, 29.38] d | ρN = 1.48 [0.85, 2.27] | P(meanIP < 5) = 0.0 | P(meanIP > 20) = 0.321 | P(R0 > 10) = 0.079
+          P(r) = [0.011, 0.016, 0.019, 0.023, 0.027, 0.03, 0.031, 0.032, 0.032, 0.031, 0.031, 0.03, 0.03, 0.029, 0.029, 0.028, 0.028, 0.027, 0.027, 0.026, 0.026, 0.025, 0.025, 0.025, 0.024, 0.024, 0.024, 0.024, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.021]
+   draws (4000): R0 = 5.12 [2.77, 10.62] | meanIP = 14.09 [6.76, 29.38] d | ρN = 1.49 [0.85, 2.25] | expected cases Στ·N = 992.31 [921.46, 998.61] (observed K = 948)
+   recorded mean interval under daily recording, μ + E[(1 − W)⁺]: 14.09 [6.76, 29.38] d (data's mean recorded interval 6.43 d; DPH mean 6.328 d)

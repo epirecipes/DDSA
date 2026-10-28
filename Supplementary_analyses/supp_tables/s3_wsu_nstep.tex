@@ -1,0 +1,11 @@
+\begin{tabular}{p{0.33\textwidth} c c c c}
+\toprule
+Population-size step & $N$ & $R_0$ & Mean IP (d) & $\hat R$ \\
+\midrule
+Imputation step of Algorithm~4.1, $n-K\sim\mathrm{NegBin}(K,\tau_\infty)$, no $\binom{n}{K}$ & 7{,}786 [6{,}731, 9{,}052] & 1.09 [1.05, 1.14] & 5.13 & 1.008 \\
+Exact conditional draw under the complete Binomial, $n-K\sim\mathrm{NegBin}(K+1,q_T)$ & 12{,}785 [9{,}391, 17{,}603] & 0.98 [0.94, 1.04] & 5.03 & 1.032 \\
+$N$ summed out of the complete Binomial (NUTS) & 12{,}232 [9{,}092, 17{,}124] & 0.99 [0.94, 1.05] & 5.04 & 1.005 \\
+\addlinespace
+DDSA (main text, Section~3(c)) & 14{,}144 & 0.97 & 5.12 & -- \\
+\bottomrule
+\end{tabular}

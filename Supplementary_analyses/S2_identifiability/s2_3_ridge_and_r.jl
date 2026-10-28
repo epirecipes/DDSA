@@ -67,7 +67,7 @@ for (hi, tagf) in ((5.0, r -> "trunc_rung$r"), (20.0, r -> "wide_rung$r"))
     p = plot(xlabel = "Mean infectious period (days)", ylabel = "R₀", title = "R₀ prior U(0.5, $(Int(hi)))",
              xlims = (0, hi == 5 ? 16 : 30.5), ylims = (0, hi == 5 ? 5.3 : 20.5), legend = hi == 5 ? :bottomright : false,
              grid = true, gridalpha = 0.15, framestyle = :box, titlefontsize = 10, guidefontsize = 9,
-             tickfontsize = 8, legendfontsize = 7, foreground_color_legend = nothing)
+             tickfontsize = 8, legendfontsize = 9, foreground_color_legend = nothing)
     for (rr, ls, lab) in ((1, :dot, "Euler–Lotka, r = 1"), (4, :solid, "Euler–Lotka, r = 4"), (10, :dash, "Euler–Lotka, r = 10"))
         xs = [μ for μ in μgrid if μ > rr]
         plot!(p, xs, [R0_theory(rr, μ, λ_true) for μ in xs], color = "#55534e", lw = 1.5, ls = ls, label = lab)

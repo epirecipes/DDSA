@@ -1,0 +1,11 @@
+== map–Poisson, numerical grid posterior, N=99 (whole population), K=91, T=40 d (2026-10-23T15:57:13.044)
+   truth: R0=3.164, mean IP E[W]=6.328 d, ρN=0.99; priors R0 ~ U(0.5, 20.0), μ ~ U(1, 30), ρ ~ Beta(1, N − 1), r uniform on 1..10 with r < μ
+   check: 25 random points, max |Turing log-joint − grid log density| = 6.82e-13
+   grid: 620 μ × 10 r, windows 49 × 49 (±7 sd), 4400 finite (μ, r) cells, 282 s on 6 threads
+   diagnostics: max window edge share 1.9e-04 (mass-weighted mean 1.2e-06) | fallback windows 73 (posterior mass 1.1e-02) | windows with second-mode coarse cells 0 (posterior mass 0.0e+00)
+      fallback window μ=29.1250 r=2: mass 1.7e-03, R0 [6.38, 20.00], ρN [0.054, 14], edge share 3.4e-06
+      fallback window μ=18.1250 r=8: mass 1.2e-03, R0 [3.68, 15.12], ρN [0.037, 14], edge share 9.0e-12
+      fallback window μ=20.3750 r=3: mass 1.1e-03, R0 [4.42, 17.18], ρN [0.037, 14], edge share 1.3e-11
+   posterior: R0 = 10.16 [3.93, 14.66] | meanIP = 22.62 [8.26, 29.62] d | ρN = 1.01 [0.44, 2.27] | P(meanIP < 5) = 0.004 | P(meanIP > 20) = 0.641 | P(R0 > 10) = 0.519
+          P(r) = [0.058, 0.078, 0.093, 0.102, 0.107, 0.111, 0.113, 0.114, 0.113, 0.112]
+   draws (4000): R0 = 10.2 [3.97, 14.73] | meanIP = 22.88 [8.26, 29.62] d | ρN = 1.04 [0.44, 2.28] | expected cases Στ·N = 97.86 [95.65, 98.53] (observed K = 91)
