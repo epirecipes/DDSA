@@ -26,8 +26,8 @@ To showcase this approach we apply the method to real data. The
 2018–2020 Ebola virus disease (EVD) epidemic in the Democratic Republic
 of the Congo (DRC) unfolded in three successive waves across North Kivu,
 South Kivu, and Ituri. In this notebook we focus on Wave 1, from the
-outbreak declaration in August 2018 to 27 February 2019, and analyse 907
-individual case records.
+first recorded onset to 27 February 2019, and analyse 907 individual
+case records.
 
 This dataset was previously analysed using the continuous version of DSA
 by [Vossler et
@@ -72,9 +72,11 @@ infectious-period term, because hospitalisation dates are missing.
 Hosp-only records are handled with a convolution that marginalises over
 unknown onset time:
 
-$$\log P\left(T_{\mathrm{rem}}=t \mid f, p_\gamma\right)
+$$
+\log P\left(T_{\mathrm{rem}}=t \mid f, p_\gamma\right)
 =
-\log\left(\sum_{u=1}^{t-1} f_u (1-p_\gamma)^{t-u-1} p_\gamma\right).$$
+\log\left(\sum_{u=1}^{t-1} f_u (1-p_\gamma)^{t-u-1} p_\gamma\right).
+$$
 
 Since we are missing the “onset” time, but know the “removal” time, the
 model treats the onset as a hidden variable and sums over every possible
@@ -408,8 +410,8 @@ describe(chain)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 30.86 seconds
-    Compute duration  = 119.81 seconds
+    Wall duration     = 23.54 seconds
+    Compute duration  = 91.01 seconds
     parameters        = β, γ, ρ, N
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 

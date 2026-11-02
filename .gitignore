@@ -18,3 +18,6 @@
 
 # Figure PDFs written by the notebooks
 figures/
+
+# Output of Measles_Hagelloch_1861/sensitivity_N_bounds.jl
+sensitivity_out/

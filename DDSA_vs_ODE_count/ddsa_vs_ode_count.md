@@ -318,19 +318,22 @@ ll_total = logpdf(Poisson(sum(μ_ode)), K)             # Poisson on the grand to
 
 # Fitting all models
 
-All five models are sampled with 4 chains of 2000 warm-up and 2000
-posterior draws. The four count models start each chain from a draw from
-the prior; the DDSA chains start from jittered data-based values. The
-three $\gamma$-free count models use NUTS with target acceptance 0.95
-and `max_depth` 12. The $\gamma$-fixed model uses standard NUTS (target
-acceptance 0.8). For DDSA, the integer phase count $r$ is summed out of
-the likelihood over its prior support $r \in \{1, \ldots, r_{\max}\}$
-(`marginal_r_loglik`, from the shared `IntegerParameters.jl`), and NUTS
-(target acceptance 0.8) samples $(\beta, \rho, p)$. Posterior draws of
-$r$ are recovered afterwards from its exact conditional distribution.
+All five models are sampled with 4 chains of 2000 posterior draws. The
+four count models use 2000 warm-up iterations and start each chain from
+a draw from the prior; DDSA uses the standard settings of every DDSA
+analysis (1000 warm-up iterations) and starts its chains from jittered
+data-based values. All models use `max_depth` 12 and `Δ_max` 1000. The
+three $\gamma$-free count models use target acceptance 0.95; the
+$\gamma$-fixed model uses 0.8. For DDSA, the integer phase count $r$ is
+summed out of the likelihood over its prior support
+$r \in \{1, \ldots, r_{\max}\}$ (`marginal_r_loglik`, from the shared
+`IntegerParameters.jl`), and NUTS (target acceptance 0.8) samples
+$(\beta, \rho, p)$. Posterior draws of $r$ are recovered afterwards from
+its exact conditional distribution.
 
 ``` julia
-n_warm, n_post, n_chains = 2000, 2000, 4
+n_warm, n_post, n_chains = 2000, 2000, 4   # count models
+n_warm_ddsa = 1000                         # standard DDSA settings (Methods)
 # Start each chain from a draw from the prior. (Turing's default, uniform(-2, 2) on the
 # unconstrained scale, can start far outside the prior's mass, e.g. ρ ≈ 0.5 under Beta(1, 500).)
 prior_inits(model, n) = fill(InitFromPrior(), n)
@@ -341,7 +344,7 @@ nuts_count = NUTS(n_warm, 0.95; max_depth=12, Δ_max=1000.0)
 ch_pois = sample_count(count_exp_pois(incidence, N),         nuts_count)
 ch_exp  = sample_count(count_exp(incidence, N),              nuts_count)
 ch_erl  = sample_count(count_erlang(incidence, N),           nuts_count)
-ch_fix  = sample_count(count_exp_fixed(incidence, N, γ_fix), NUTS(1000, 0.8))
+ch_fix  = sample_count(count_exp_fixed(incidence, N, γ_fix), NUTS(n_warm, 0.8; max_depth=12, Δ_max=1000.0))
 
 nb_r_max   = min(10, minimum(delta))
 model_ddsa = dph_full(N, 1, nsteps, K, th, delta, nb_r_max, Δt)
@@ -351,7 +354,7 @@ init_rng = Xoshiro(20261006)
 ddsa_inits = let z = K / N, R0h = -log(1 - z) / z, ip = mean(delta), ρh = median(Beta(1.0, N - 1)), j = () -> exp(0.1 * randn(init_rng))
     [InitFromParams((β = j() * R0h / ip, ρ = j() * ρh, nb_p = clamp(j() * minimum(delta) / ip, 1e-3, 0.99))) for _ in 1:4]
 end
-ch_ddsa = sample(model_ddsa, NUTS(n_warm, 0.8; max_depth=12, Δ_max=1000.0), MCMCThreads(), n_post, 4;
+ch_ddsa = sample(model_ddsa, NUTS(n_warm_ddsa, 0.8; max_depth=12, Δ_max=1000.0), MCMCThreads(), n_post, 4;
                  progress=false, chain_type=MCMCChains.Chains, initial_params=ddsa_inits)
 # Posterior draws of nb_r: one draw from P(r | data, β, ρ, p) per MCMC draw, added to the chain
 r_draws = [sample_index(lps) for lps in returned(model_ddsa, ch_ddsa)]   # support is 1:nb_r_max
@@ -394,21 +397,20 @@ end
 
     prior R0: 2.46 [0.12, 29.91]
 
-
     Convergence
       ODE-exp Poisson (γ free): max R̂=1.003, min ESS=1133, divergences=0
       ODE-exp NegBin  (γ free): max R̂=1.003, min ESS=1687, divergences=0
       ODE-erlang NB   (γ free): max R̂=1.002, min ESS=1537, divergences=0
-      ODE-exp NB   (γ fixed): max R̂=1.001, min ESS=3639, divergences=0
-      DDSA                     : max R̂=1.001, min ESS=3407, divergences=0
+      ODE-exp NB   (γ fixed): max R̂=1.001, min ESS=3446, divergences=0
+      DDSA                     : max R̂=1.002, min ESS=3247, divergences=0
 
     Posterior median [95% CrI]
     truth:                    β=0.5,  E[W]=6.33 d,  R0=3.16
     ODE-exp Poisson (γ free): β=0.485 [0.37, 0.978]  meanIP=16.057 [1.971, 47.18]  R0=7.517 [1.876, 20.162]
     ODE-exp NegBin  (γ free): β=0.529 [0.375, 1.044]  meanIP=11.06 [1.738, 46.066]  R0=5.662 [1.756, 19.777]
     ODE-erlang NB   (γ free): β=0.44 [0.329, 0.656]  meanIP=10.74 [2.901, 45.045]  R0=4.572 [1.823, 17.634]
-    ODE-exp NB   (γ fixed):   β=0.686 [0.591, 0.79]  meanIP=4.0 d (fixed)  R0=2.745 [2.366, 3.158]
-    DDSA (line list):         β=0.489 [0.429, 0.557]  meanIP=6.383 [6.017, 6.799]  R0=3.119 [2.742, 3.568]  r=4 [4, 4]
+    ODE-exp NB   (γ fixed):   β=0.688 [0.59, 0.788]  meanIP=4.0 d (fixed)  R0=2.752 [2.362, 3.154]
+    DDSA (line list):         β=0.489 [0.428, 0.557]  meanIP=6.383 [6.01, 6.823]  R0=3.119 [2.74, 3.567]  r=4 [4, 4]
 
 # Figure
 
