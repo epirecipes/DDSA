@@ -246,13 +246,13 @@ if oR and oO and at:
     est = load(os.path.join(D3, "s6_7_dsa_own_mle.csv"))
     ci = lambda r, p: f"{f(r[p + '_med']):.2f} [{f(r[p + '_lo']):.2f}, {f(r[p + '_hi']):.2f}]"
     L = ["\\begin{tabular}{p{0.26\\textwidth} p{0.2\\textwidth} p{0.2\\textwidth} p{0.22\\textwidth}}", "\\toprule",
-         "Setting & Published code & Our implementation & Agreement \\\\", "\\midrule",
+         "Setting & Published code & Re-implementation & Agreement \\\\", "\\midrule",
          f"SDS, Example 2: {len(known)} outbreaks, $n=1{{,}}000$ known & $R_0$ {rng([f(a['R0_med']) for a, _ in known])} & "
          f"$R_0$ {rng([f(b['R0_med']) for _, b in known])} & $R_0$ medians within {dR0k:.3f} \\\\",
          f"SDS, Example 2: the same outbreaks, $n$ imputed (Algorithm~4.1) & $R_0$ {rng([f(a['R0_med']) for a, _ in imp])} & "
          f"$R_0$ {rng([f(b['R0_med']) for _, b in imp])} & $R_0$ within 0.02 and $N$ within 2\\% in {sum(ok)} of {len(ok)} \\\\",
          f"SDS, example 1: WSU, $n$ imputed & $R_0$ {ci(wR, 'R0')}, $N$ {fmtN(f(wR['N_med']))} & $R_0$ {ci(wO, 'R0')}, $N$ {fmtN(f(wO['N_med']))} & -- \\\\",
-         f"DSA, synthetic study: {len(fine)} outbreaks, $N=10{{,}}000$, infection times only & $\\ell_I$ at our optimum & $\\ell_I$ at our optimum & within {dll:.2f} log units \\\\",
+         f"DSA, synthetic study: {len(fine)} outbreaks, $N=10{{,}}000$, infection times only & $\\ell_I$ at the re-implementation's optimum & $\\ell_I$ at the same optimum & within {dll:.2f} log units \\\\",
          "\\bottomrule", "\\end{tabular}"]
     write("s3_own.tex", "\n".join(L) + "\n")
 else:

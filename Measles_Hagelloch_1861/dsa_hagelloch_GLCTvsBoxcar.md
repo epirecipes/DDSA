@@ -638,8 +638,8 @@ chain = add_integer_draws(model_mtheta, chain, glct_propagate)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 280.26 seconds
-    Compute duration  = 1108.09 seconds
+    Wall duration     = 242.66 seconds
+    Compute duration  = 959.52 seconds
     parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -693,8 +693,8 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
     Iterations        = 1001:1:3000
     Number of chains  = 4
     Samples per chain = 2000
-    Wall duration     = 324.71 seconds
-    Compute duration  = 1263.8 seconds
+    Wall duration     = 284.45 seconds
+    Compute duration  = 1107.16 seconds
     parameters        = beta_C1, beta_C2, beta_H, beta_G, mean_δ, nb_r, N0, N1, N2
     internals         = n_steps, is_accept, acceptance_rate, log_density, hamiltonian_energy, hamiltonian_energy_error, max_hamiltonian_energy_error, tree_depth, numerical_error, step_size, nom_step_size, logprior, loglikelihood, logjoint
 
@@ -743,15 +743,15 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
       parameters         ess      rhat   ess_per_sec 
           Symbol     Float64   Float64       Float64 
 
-         beta_C1   2326.9100    1.0032        2.0999
-         beta_C2   2205.6167    1.0024        1.9905
-          beta_H   2429.1378    1.0015        2.1922
-          beta_G   1903.9150    1.0032        1.7182
-          mean_δ   3740.5520    1.0004        3.3757
+         beta_C1   2326.9100    1.0032        2.4251
+         beta_C2   2205.6167    1.0024        2.2987
+          beta_H   2429.1378    1.0015        2.5316
+          beta_G   1903.9150    1.0032        1.9842
+          mean_δ   3740.5520    1.0004        3.8983
             nb_r         NaN       NaN           NaN
-              N0   8008.4883    0.9998        7.2273
-              N1   6451.2862    1.0001        5.8220
-              N2   8218.7280    0.9998        7.4170
+              N0   8008.4883    0.9998        8.3463
+              N1   6451.2862    1.0001        6.7234
+              N2   8218.7280    0.9998        8.5654
 
 **Boxcar**
 
@@ -762,15 +762,15 @@ chain_bc = add_integer_draws(model_boxcar, chain_bc, boxcar_propagate)
       parameters         ess      rhat   ess_per_sec 
           Symbol     Float64   Float64       Float64 
 
-         beta_C1   1767.7906    1.0041        1.3988
-         beta_C2   1660.0152    1.0021        1.3135
-          beta_H   2037.9351    1.0037        1.6125
-          beta_G   1551.7200    1.0044        1.2278
-          mean_δ   4444.8425    1.0005        3.5170
-            nb_r   8016.0481    1.0000        6.3428
-              N0   7922.5611    0.9999        6.2688
-              N1   7125.3017    1.0003        5.6380
-              N2   8261.9266    1.0005        6.5374
+         beta_C1   1767.7906    1.0041        1.5967
+         beta_C2   1660.0152    1.0021        1.4993
+          beta_H   2037.9351    1.0037        1.8407
+          beta_G   1551.7200    1.0044        1.4015
+          mean_δ   4444.8425    1.0005        4.0146
+            nb_r   8016.0481    1.0000        7.2402
+              N0   7922.5611    0.9999        7.1558
+              N1   7125.3017    1.0003        6.4357
+              N2   8261.9266    1.0005        7.4623
 
 ## Posterior summaries
 
@@ -1000,7 +1000,9 @@ Roberts, 2004). This yields $N_0 \in [90,99]$, $N_1 \in [30,39]$,
 $N_2 \in [68,77]$. Neal & Roberts instead set $n = m = 188$, assuming
 that every susceptible child was infected. In our fit the class sizes
 concentrate at their upper bounds, which reflects the smaller final size
-of the mean-field model.
+of the mean-field model; with the class sizes fixed at the case counts,
+as in Neal & Roberts, $R_0$ (2.17) and $P(\beta_{C1} > \beta_{C2})$
+(0.99) are unchanged (`sensitivity_N_bounds.jl`).
 
 We note that the $\beta$ parameter values are not directly comparable in
 scale: Neal & Roberts use individual-to-individual per-day rates; our
