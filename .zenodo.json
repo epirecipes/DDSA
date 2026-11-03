@@ -1,0 +1,44 @@
+{
+  "title": "Discrete dynamic survival analysis of epidemic case line lists: code and analyses",
+  "upload_type": "software",
+  "version": "1.0.0",
+  "description": "<p>Code, notebooks and supplementary analyses used for the manuscript <em>Discrete dynamic survival analysis of epidemic case line lists</em>.</p><p>The Quarto notebooks fit discrete dynamic survival analysis (DDSA) models with Turing.jl to a synthetic outbreak under three data-availability scenarios, compare DDSA with ODE count models on the same outbreak, and analyse the 2009 H1N1 influenza outbreak at Washington State University, the 2018–2020 Ebola virus disease epidemic in the Democratic Republic of the Congo and the 1861 measles outbreak in Hagelloch. <code>Supplementary_analyses/</code> holds the analyses of the supplementary material, with a guide notebook.</p><p>This archive is the record of the manuscript's analyses. To apply DDSA to other line lists, use the Julia package DiscreteDynamicSurvivalAnalysis.jl (https://github.com/epirecipes/DiscreteDynamicSurvivalAnalysis.jl), whose vignettes reproduce the manuscript analyses.</p><p>The code is released under the MIT licence. The data files were obtained from the sources listed in README.md.</p>",
+  "creators": [
+    {
+      "name": "Montes-Olivas, Sandra"
+    },
+    {
+      "name": "Frost, Simon D. W."
+    }
+  ],
+  "license": "mit",
+  "access_right": "open",
+  "keywords": [
+    "dynamic survival analysis",
+    "epidemic modelling",
+    "line lists",
+    "Bayesian inference"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/epirecipes/DiscreteDynamicSurvivalAnalysis.jl",
+      "relation": "isSourceOf",
+      "resource_type": "software"
+    },
+    {
+      "identifier": "10.5281/zenodo.6104188",
+      "relation": "references",
+      "resource_type": "dataset"
+    },
+    {
+      "identifier": "https://github.com/cbskust/SDS.Epidemic",
+      "relation": "references",
+      "resource_type": "software"
+    },
+    {
+      "identifier": "https://CRAN.R-project.org/package=outbreaks",
+      "relation": "references",
+      "resource_type": "software"
+    }
+  ]
+}

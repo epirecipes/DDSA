@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: >-
+  This archive holds the code, data and notebooks behind the analyses of the article below.
+  To apply DDSA to your own line lists, use the Julia package DiscreteDynamicSurvivalAnalysis.jl.
+type: software
+title: "Discrete dynamic survival analysis of epidemic case line lists: code and analyses"
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/epirecipes/DDSA-manuscript"
+abstract: >-
+  Code, notebooks and supplementary analyses used for the manuscript "Discrete dynamic survival
+  analysis of epidemic case line lists": a synthetic outbreak under three data-availability
+  scenarios, a comparison with ODE count models, the 2009 H1N1 outbreak at Washington State
+  University, the 2018-2020 Ebola epidemic in the DRC and the 1861 measles outbreak in Hagelloch.
+  To apply DDSA to other line lists, use the package DiscreteDynamicSurvivalAnalysis.jl.
+keywords:
+  - dynamic survival analysis
+  - epidemic modelling
+  - line lists
+  - Bayesian inference
+  - Julia
+authors:
+  - family-names: Montes-Olivas
+    given-names: Sandra
+  - family-names: Frost
+    given-names: Simon D. W.
+preferred-citation:
+  type: article
+  title: "Discrete dynamic survival analysis of epidemic case line lists"
+  status: in-preparation
+  authors:
+    - family-names: Montes-Olivas
+      given-names: Sandra
+    - family-names: Abbott
+      given-names: Sam
+    - family-names: Gravenor
+      given-names: Michael B.
+    - family-names: Funk
+      given-names: Sebastian
+    - family-names: Frost
+      given-names: Simon D. W.
