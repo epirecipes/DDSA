@@ -1,4 +1,4 @@
-# Discrete dynamic survival analysis of epidemic case line lists: code and analyses
+# Discrete dynamic survival analysis of epidemic case line lists: code and analyses [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23924832.svg)](https://doi.org/10.5281/zenodo.23924832)
 
 This repository contains the code, notebooks, and supplementary analyses used for the manuscript  *Discrete dynamic survival analysis of epidemic case line lists*. It is archived on Zenodo and records the manuscript's analyses.
 
