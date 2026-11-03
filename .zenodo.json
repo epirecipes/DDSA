@@ -11,6 +11,11 @@
       "name": "Frost, Simon D. W."
     }
   ],
+  "contributors": [
+    { "name": "Abbott, Sam", "type": "Researcher" },
+    { "name": "Gravenor, Michael B.", "type": "Researcher" },
+    { "name": "Funk, Sebastian", "type": "Researcher" }
+  ],
   "license": "mit",
   "access_right": "open",
   "keywords": [
