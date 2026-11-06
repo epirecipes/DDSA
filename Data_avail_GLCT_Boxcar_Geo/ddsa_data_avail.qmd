@@ -270,9 +270,10 @@ function simulate_discrete_glct(Tm::AbstractMatrix, α::AbstractVector, β::Real
         # Probability-per-step infection update (hazard -> event probability).
         p_inf = rate_to_proportion(β * I, Δt)
         new_inf = p_inf * S
-        x = Tm' * x + α .* new_inf
+        # Recoveries of this step leave from the stages before they are updated.
         absorption_probs = ones(eltype(α), k) - Tm * ones(eltype(α), k)
         recov = dot(absorption_probs, x)
+        x = Tm' * x + α .* new_inf
         S = S - new_inf
         R = R + recov
         push!(S_hist, S)

@@ -4,7 +4,7 @@ message: >-
   To apply DDSA to your own line lists, use the Julia package DiscreteDynamicSurvivalAnalysis.jl.
 type: software
 title: "Discrete dynamic survival analysis of epidemic case line lists: code and analyses"
-version: 1.0.0
+version: 1.0.1
 doi: 10.5281/zenodo.23924833
 license: MIT
 repository-code: "https://github.com/epirecipes/DDSA-manuscript"

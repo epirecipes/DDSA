@@ -290,9 +290,10 @@ function simulate_discrete_glct(Tm::AbstractMatrix, α::AbstractVector, β::Real
         # Probability-per-step infection update (hazard -> event probability).
         p_inf = rate_to_proportion(β * I, Δt)
         new_inf = p_inf * S
-        x = Tm' * x + α .* new_inf
+        # Recoveries of this step leave from the stages before they are updated.
         absorption_probs = ones(eltype(α), k) - Tm * ones(eltype(α), k)
         recov = dot(absorption_probs, x)
+        x = Tm' * x + α .* new_inf
         S = S - new_inf
         R = R + recov
         push!(S_hist, S)
@@ -777,7 +778,7 @@ _ = sample(model_A, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_A = @elapsed chain_A = sample_summing_r(model_A)
 ```
 
-    Scenario A (Full DPH): 7.6 s
+    Scenario A (Full DPH): 6.8 s
 
 ## Scenario B — Infection-only DDSA (DPH)
 
@@ -794,7 +795,7 @@ t_B = @elapsed chain_B = sample_summing_r(model_B; n_draws = n_samples_B)
 chain_B = add_draws(chain_B, :nb_p, Array(chain_B[:nb_r]) ./ Array(chain_B[:mean_ip]))
 ```
 
-    Scenario B (DPH, infection-only, summed over r): 35.0 s
+    Scenario B (DPH, infection-only, summed over r): 28.9 s
     Scenario B posterior P(r): [0.021, 0.086, 0.149, 0.203, 0.208, 0.151, 0.095, 0.053, 0.023, 0.012]
 
 ## Scenario C — Recovery-only DDSA (DPH)
@@ -811,7 +812,7 @@ _ = sample(model_C, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_C = @elapsed chain_C = sample_summing_r(model_C)
 ```
 
-    Scenario C (Recovery-only DPH): 1.5 s
+    Scenario C (Recovery-only DPH): 1.2 s
     Scenario C: inferred nb_r = 4  (Erlang k = 4)
 
 ## Scenario C — Recovery times only (Geometric)
@@ -839,7 +840,7 @@ _ = sample(model_Ageo, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains
 t_Ageo = @elapsed chain_Ageo = sample_std(model_Ageo)
 ```
 
-    Scenario A (Full Geometric): 2.0 s
+    Scenario A (Full Geometric): 1.9 s
 
 ## Scenario B — Geometric baseline ($r \equiv 1$)
 
@@ -854,7 +855,7 @@ _ = sample(model_Bgeo, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains
 t_Bgeo = @elapsed chain_Bgeo = sample_std(model_Bgeo)
 ```
 
-    Scenario B (Geometric, r≡1, infection-only): 1.9 s
+    Scenario B (Geometric, r≡1, infection-only): 1.7 s
 
 ## Scenario A — Full (Boxcar)
 
@@ -869,7 +870,7 @@ _ = sample(model_Abc, nuts_int, 1; progress=false, chain_type=MCMCChains.Chains)
 t_Abc = @elapsed chain_Abc = sample_summing_r(model_Abc)
 ```
 
-    Scenario A (Full Boxcar): 6.8 s
+    Scenario A (Full Boxcar): 6.4 s
 
 ## Scenario B — Infection-only (Boxcar)
 
@@ -884,7 +885,7 @@ t_Bbc = @elapsed chain_Bbc = sample_summing_r(model_Bbc; n_draws = n_samples_B)
 chain_Bbc = add_draws(chain_Bbc, :nb_p, Array(chain_Bbc[:nb_r]) ./ Array(chain_Bbc[:mean_ip]))
 ```
 
-    Scenario B (Boxcar, infection-only, summed over r): 214.0 s
+    Scenario B (Boxcar, infection-only, summed over r): 185.1 s
 
 # Results
 

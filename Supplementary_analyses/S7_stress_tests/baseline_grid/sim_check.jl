@@ -18,9 +18,10 @@ function simulate_discrete_glct(Tm::AbstractMatrix, α::AbstractVector, β::Real
     S_hist = Any[S]; I_hist = Any[sum(x)]; R_hist = Any[R]
     for _ in 1:nsteps
         I = sum(x); p_inf = rate_to_proportion(β * I, Δt); new_inf = p_inf * S
-        x = Tm' * x + α .* new_inf
         absorption_probs = ones(eltype(α), k) - Tm * ones(eltype(α), k)
-        recov = dot(absorption_probs, x); S = S - new_inf; R = R + recov
+        recov = dot(absorption_probs, x)    # recoveries of this step, from the stages before the update
+        x = Tm' * x + α .* new_inf
+        S = S - new_inf; R = R + recov
         push!(S_hist, S); push!(I_hist, sum(x)); push!(R_hist, R)
     end
     τ = S_hist[1] - S_hist[end]; dS = diff(S_hist); f = max.(-dS, 0.0); sF = sum(f)
